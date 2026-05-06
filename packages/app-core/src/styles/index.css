@@ -2409,6 +2409,35 @@ textarea,
   outline: none;
 }
 
+[data-settings-search-id] {
+  scroll-margin-block: 24px;
+  transition: background-color 180ms ease;
+}
+
+[data-settings-search-highlight="true"] {
+  background: rgb(var(--z-accent) / 0.055);
+  animation: settings-search-target-tint 2000ms ease-out;
+}
+
+@keyframes settings-search-target-tint {
+  0% {
+    background: rgb(var(--z-accent) / 0);
+  }
+  12%,
+  72% {
+    background: rgb(var(--z-accent) / 0.07);
+  }
+  100% {
+    background: rgb(var(--z-accent) / 0.025);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-settings-search-highlight="true"] {
+    animation: none;
+  }
+}
+
 /* ===========================================================================
  * Vim navigation
  * =========================================================================*/

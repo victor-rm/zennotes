@@ -37,6 +37,10 @@ import {
   getSystemFolderLabel
 } from '../lib/system-folder-labels'
 import { normalizeDailyNotesDirectory } from '../lib/vault-layout'
+import {
+  getSettingsSearchResults,
+  type SettingsSearchCategory
+} from '../lib/settings-search'
 import { getZenBridge } from '@zennotes/bridge-contract/bridge'
 import companyLogo from '../assets/lumary-labs-logo.svg'
 import { confirmApp } from './ConfirmHost'
@@ -54,12 +58,33 @@ type SettingsCategoryId =
 
 type ResolvedVaultTextSearchBackend = 'builtin' | 'ripgrep' | 'fzf'
 
-interface SettingsCategory {
+interface SettingsCategory extends SettingsSearchCategory<SettingsCategoryId> {
   id: SettingsCategoryId
   title: string
   description: string
   keywords: string[]
   content: JSX.Element
+}
+
+function settingsSearchTargetProps(
+  settingId: string | undefined
+): { 'data-settings-search-id'?: string } {
+  return settingId ? { 'data-settings-search-id': settingId } : {}
+}
+
+function findSettingsSearchTarget(root: HTMLElement, targetId: string): HTMLElement | null {
+  for (const element of root.querySelectorAll<HTMLElement>('[data-settings-search-id]')) {
+    if (element.dataset.settingsSearchId === targetId) return element
+  }
+  return null
+}
+
+function clearSettingsSearchHighlights(root: HTMLElement): void {
+  root
+    .querySelectorAll<HTMLElement>('[data-settings-search-highlight="true"]')
+    .forEach((element) => {
+      delete element.dataset.settingsSearchHighlight
+    })
 }
 
 function resolveVaultTextSearchBackend(
@@ -160,7 +185,10 @@ function formatReleaseNotesForDisplay(notes: string | null): string | null {
 }
 
 export function SettingsModal(): JSX.Element {
-  const appInfo = getZenBridge().getAppInfo()
+  const zenBridge = getZenBridge()
+  const appInfo = zenBridge.getAppInfo()
+  const supportsRemoteWorkspace =
+    appInfo.runtime === 'desktop' && zenBridge.getCapabilities().supportsRemoteWorkspace
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const vimMode = useStore((s) => s.vimMode)
   const setVimMode = useStore((s) => s.setVimMode)
@@ -513,7 +541,9 @@ export function SettingsModal(): JSX.Element {
   }
 
   const ref = useRef<HTMLDivElement | null>(null)
+  const settingsSearchHighlightTimerRef = useRef<number | null>(null)
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>('appearance')
+  const [activeSearchResultId, setActiveSearchResultId] = useState<string | null>(null)
   const [navQuery, setNavQuery] = useState('')
   const availableVaultTextSearchTools = [
     vaultTextSearchCapabilities?.ripgrep ? 'ripgrep' : null,
@@ -559,12 +589,86 @@ export function SettingsModal(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [setSettingsOpen])
 
+  useEffect(() => {
+    return () => {
+      if (settingsSearchHighlightTimerRef.current != null) {
+        window.clearTimeout(settingsSearchHighlightTimerRef.current)
+      }
+    }
+  }, [])
+
+  const jumpToSettingsSearchTarget = useCallback((targetId: string): void => {
+    if (settingsSearchHighlightTimerRef.current != null) {
+      window.clearTimeout(settingsSearchHighlightTimerRef.current)
+      settingsSearchHighlightTimerRef.current = null
+    }
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const root = ref.current
+        if (!root) return
+
+        const target = findSettingsSearchTarget(root, targetId)
+        if (!target) return
+
+        clearSettingsSearchHighlights(root)
+        target.dataset.settingsSearchHighlight = 'true'
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+
+        settingsSearchHighlightTimerRef.current = window.setTimeout(() => {
+          delete target.dataset.settingsSearchHighlight
+          settingsSearchHighlightTimerRef.current = null
+        }, 2000)
+      })
+    })
+  }, [])
+
+  const leaderKeyHintsTargetId = vimMode ? 'leader-key-hints' : 'vim-mode'
+  const leaderHintBehaviorTargetId =
+    vimMode && whichKeyHints ? 'leader-hint-behavior' : leaderKeyHintsTargetId
+  const leaderHintDurationTargetId =
+    vimMode && whichKeyHints && whichKeyHintMode === 'timed'
+      ? 'leader-hint-duration'
+      : leaderHintBehaviorTargetId
+
   const categories: SettingsCategory[] = [
     {
       id: 'appearance',
       title: 'Appearance',
       description: 'Theme family, mode, and chrome surface styling.',
       keywords: ['theme', 'mode', 'variant', 'dark sidebar', 'surface', 'look'],
+      searchItems: [
+        {
+          id: 'theme-family',
+          title: 'Theme family',
+          description: 'Pick the visual system ZenNotes uses across the app.',
+          keywords: ['theme', 'family', 'apple', 'gruvbox', 'catppuccin', 'github', 'solarized', 'nord', 'tokyo night']
+        },
+        {
+          id: 'theme-mode',
+          title: 'Theme mode',
+          description: 'Choose light, dark, or automatic theme mode.',
+          keywords: ['light', 'dark', 'auto', 'mode']
+        },
+        {
+          id: 'theme-variant',
+          title: 'Theme variant',
+          description: 'Choose a family-specific contrast, flavor, or variant.',
+          keywords: ['variant', 'contrast', 'flavor'],
+          available: visibleVariants.length > 1
+        },
+        {
+          id: 'dark-sidebar',
+          title: 'Dark sidebar',
+          description: 'Tint the sidebar one step darker than the canvas so the chrome reads as a separate surface.'
+        },
+        {
+          id: 'sidebar-arrows',
+          title: 'Sidebar arrows',
+          description: 'Show disclosure arrows for collapsible folders and sidebar sections.',
+          keywords: ['chevrons', 'disclosure']
+        }
+      ],
       content: (
         <div className="space-y-6">
           <Section
@@ -572,7 +676,7 @@ export function SettingsModal(): JSX.Element {
             description="Pick the visual system ZenNotes uses across the app."
           >
             <div className="flex flex-col gap-5 px-5 py-5">
-              <div>
+              <div {...settingsSearchTargetProps('theme-family')}>
                 <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-ink-500">
                   Family
                 </div>
@@ -594,7 +698,7 @@ export function SettingsModal(): JSX.Element {
                 </div>
               </div>
 
-              <div>
+              <div {...settingsSearchTargetProps('theme-mode')}>
                 <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-ink-500">
                   Mode
                 </div>
@@ -617,7 +721,7 @@ export function SettingsModal(): JSX.Element {
               </div>
 
               {visibleVariants.length > 1 && (
-                <div>
+                <div {...settingsSearchTargetProps('theme-variant')}>
                   <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-ink-500">
                     {themeFamily === 'gruvbox'
                       ? 'Contrast'
@@ -654,12 +758,14 @@ export function SettingsModal(): JSX.Element {
               label="Dark sidebar"
               description="Tint the sidebar one step darker than the canvas so the chrome reads as a separate surface."
               value={darkSidebar}
+              settingId="dark-sidebar"
               onChange={setDarkSidebar}
             />
             <ToggleRow
               label="Sidebar arrows"
               description="Show disclosure arrows for collapsible folders and sidebar sections."
               value={showSidebarChevrons}
+              settingId="sidebar-arrows"
               onChange={setShowSidebarChevrons}
             />
           </Section>
@@ -671,6 +777,101 @@ export function SettingsModal(): JSX.Element {
       title: 'Editor',
       description: 'Vim, leader hints, live preview, tabs, and writing behavior.',
       keywords: ['vim', 'leader', 'preview', 'tabs', 'wrap', 'pdf', 'quick note', 'quick capture', 'hotkey', 'shortcut', 'task', 'tasks'],
+      searchItems: [
+        {
+          id: 'vim-mode',
+          title: 'Vim mode',
+          description: 'First-class Vim motions in the markdown editor.',
+          keywords: ['vim', 'motions']
+        },
+        {
+          id: 'leader-key-hints',
+          title: 'Leader key hints',
+          description: 'Show a which-key style guide after pressing the Leader key so the next available actions stay visible.',
+          keywords: ['leader', 'which-key'],
+          targetId: leaderKeyHintsTargetId
+        },
+        {
+          id: 'leader-hint-behavior',
+          title: 'Leader hint behavior',
+          description: 'Timed auto-hides after a short delay. Sticky keeps the leader overlay open until you dismiss it.',
+          keywords: ['leader', 'sticky', 'timed'],
+          targetId: leaderHintBehaviorTargetId
+        },
+        {
+          id: 'leader-hint-duration',
+          title: 'Leader hint duration',
+          description: 'How long the leader overlay stays visible, and how long the pending leader sequence remains armed.',
+          keywords: ['leader', 'timeout', 'delay'],
+          targetId: leaderHintDurationTargetId
+        },
+        {
+          id: 'vault-text-search-backend',
+          title: 'Vault text search backend',
+          description: 'Auto prefers fzf when available, then ripgrep, and falls back to the built-in searcher.',
+          keywords: ['search', 'backend', 'ripgrep', 'rg', 'fzf', 'built-in']
+        },
+        {
+          id: 'ripgrep-binary-path',
+          title: 'ripgrep binary path',
+          description: 'Optional. Leave blank to use `rg` from your PATH.',
+          keywords: ['search', 'rg', 'path']
+        },
+        {
+          id: 'fzf-binary-path',
+          title: 'fzf binary path',
+          description: 'Optional. Leave blank to use `fzf` from your PATH.',
+          keywords: ['search', 'path']
+        },
+        {
+          id: 'live-preview',
+          title: 'Live preview',
+          description: 'Hide markdown syntax on lines you are not editing.',
+          keywords: ['preview', 'markdown']
+        },
+        {
+          id: 'note-tabs',
+          title: 'Note tabs',
+          description: 'Open notes in tabs and allow split-friendly tab workflows.',
+          keywords: ['tabs']
+        },
+        {
+          id: 'word-wrap',
+          title: 'Word wrap',
+          description: 'Wrap long lines to the editor width. Turn off to scroll horizontally instead.',
+          keywords: ['wrap', 'line wrap']
+        },
+        {
+          id: 'smooth-preview-scroll',
+          title: 'Smooth preview scroll',
+          description: 'Animate Ctrl+D / Ctrl+U half-page jumps in preview mode.',
+          keywords: ['preview', 'scroll']
+        },
+        {
+          id: 'pdfs-in-edit-mode',
+          title: 'PDFs in edit mode',
+          description: 'Compact keeps the editor focused. Full inlines the PDF viewer under your cursor.',
+          keywords: ['pdf', 'embed']
+        },
+        {
+          id: 'date-titled-quick-notes',
+          title: 'Date-titled Quick Notes',
+          description: 'New Quick Notes use YYYY-MM-DD instead of timestamp-style titles.',
+          keywords: ['quick note', 'date', 'title']
+        },
+        {
+          id: 'quick-note-prefix',
+          title: 'Quick Note prefix',
+          description: 'Used when naming new Quick Notes.',
+          keywords: ['quick note', 'prefix']
+        },
+        {
+          id: 'quick-capture-hotkey',
+          title: 'Quick capture hotkey',
+          description: 'System-wide shortcut to open the floating capture window.',
+          keywords: ['quick capture', 'hotkey', 'shortcut']
+        }
+      ],
       content: (
         <div className="space-y-6">
           <Section
@@ -681,6 +882,7 @@ export function SettingsModal(): JSX.Element {
               label="Vim mode"
               description="First-class Vim motions in the markdown editor."
               value={vimMode}
+              settingId="vim-mode"
               onChange={setVimMode}
             />
             {vimMode ? (
@@ -689,6 +891,7 @@ export function SettingsModal(): JSX.Element {
                   label="Leader key hints"
                   description="Show a which-key style guide after pressing the Leader key so the next available actions stay visible."
                   value={whichKeyHints}
+                  settingId="leader-key-hints"
                   onChange={setWhichKeyHints}
                 />
                 {whichKeyHints && (
@@ -697,6 +900,7 @@ export function SettingsModal(): JSX.Element {
                       label="Leader hint behavior"
                       description="Timed auto-hides after a short delay. Sticky keeps the leader overlay open until you dismiss it."
                       value={whichKeyHintMode}
+                      settingId="leader-hint-behavior"
                       options={[
                         { value: 'timed', label: 'Timed' },
                         { value: 'sticky', label: 'Sticky' }
@@ -712,6 +916,7 @@ export function SettingsModal(): JSX.Element {
                         max={3000}
                         step={100}
                         format={(v) => `${(v / 1000).toFixed(1)}s`}
+                        settingId="leader-hint-duration"
                         onChange={setWhichKeyHintTimeoutMs}
                       />
                     )}
@@ -733,6 +938,7 @@ export function SettingsModal(): JSX.Element {
               label="Vault text search backend"
               description="Auto prefers fzf when available, then ripgrep, and falls back to the built-in searcher."
               value={vaultTextSearchBackend}
+              settingId="vault-text-search-backend"
               options={[
                 { value: 'auto', label: 'Auto' },
                 { value: 'builtin', label: 'Built-in' },
@@ -746,6 +952,7 @@ export function SettingsModal(): JSX.Element {
               description="Optional. Leave blank to use `rg` from your PATH."
               value={ripgrepBinaryPath ?? ''}
               placeholder="/custom/bin/rg"
+              settingId="ripgrep-binary-path"
               onChange={(next) => setRipgrepBinaryPath(next)}
             />
             <TextInputRow
@@ -753,6 +960,7 @@ export function SettingsModal(): JSX.Element {
               description="Optional. Leave blank to use `fzf` from your PATH."
               value={fzfBinaryPath ?? ''}
               placeholder="/custom/bin/fzf"
+              settingId="fzf-binary-path"
               onChange={(next) => setFzfBinaryPath(next)}
             />
             <InlineNote>
@@ -778,30 +986,35 @@ export function SettingsModal(): JSX.Element {
               label="Live preview"
               description="Hide markdown syntax on lines you're not editing. Turn off to always see raw #, **, [[…]], and other source text."
               value={livePreview}
+              settingId="live-preview"
               onChange={setLivePreview}
             />
             <ToggleRow
               label="Note tabs"
               description="Open notes in tabs and allow split-friendly tab workflows. Turn off to keep the simpler single-note behavior."
               value={tabsEnabled}
+              settingId="note-tabs"
               onChange={setTabsEnabled}
             />
             <ToggleRow
               label="Word wrap"
               description="Wrap long lines to the editor width. Turn off to scroll horizontally instead."
               value={wordWrap}
+              settingId="word-wrap"
               onChange={setWordWrap}
             />
             <ToggleRow
               label="Smooth preview scroll"
               description="Animate Ctrl+D / Ctrl+U half-page jumps in preview mode. Turn off for an instant snap that keeps position predictable."
               value={previewSmoothScroll}
+              settingId="smooth-preview-scroll"
               onChange={setPreviewSmoothScroll}
             />
             <SegmentedRow
               label="PDFs in edit mode"
               description="Compact keeps the editor focused. Full inlines the PDF viewer under your cursor."
               value={pdfEmbedInEditMode}
+              settingId="pdfs-in-edit-mode"
               options={[
                 { value: 'compact', label: 'Compact' },
                 { value: 'full', label: 'Full' }
@@ -812,6 +1025,7 @@ export function SettingsModal(): JSX.Element {
               label="Date-titled Quick Notes"
               description="New Quick Notes use YYYY-MM-DD instead of timestamp-style titles."
               value={quickNoteDateTitle}
+              settingId="date-titled-quick-notes"
               onChange={setQuickNoteDateTitle}
             />
             <TextInputRow
@@ -819,6 +1033,7 @@ export function SettingsModal(): JSX.Element {
               description="Used when naming new Quick Notes. Leave blank for a bare timestamp or date."
               value={quickNoteTitlePrefix ?? ''}
               placeholder="Quick Note"
+              settingId="quick-note-prefix"
               onChange={setQuickNoteTitlePrefix}
             />
           </Section>
@@ -827,7 +1042,7 @@ export function SettingsModal(): JSX.Element {
             title="Quick capture"
             description="Floating capture window for thoughts you want in the vault without leaving whatever you're doing."
           >
-            <QuickCaptureHotkeyRow />
+            <QuickCaptureHotkeyRow settingId="quick-capture-hotkey" />
           </Section>
         </div>
       )
@@ -837,8 +1052,16 @@ export function SettingsModal(): JSX.Element {
       title: 'Keymap',
       description: 'Remap global shortcuts, Vim bindings, and view navigation.',
       keywords: ['shortcuts', 'bindings', 'leader', 'vim', 'remap', 'keyboard'],
+      searchItems: [
+        {
+          id: 'shortcut-editor',
+          title: 'Shortcut editor',
+          description: 'Record a new key or sequence for the app’s keyboard-first actions.',
+          keywords: ['shortcuts', 'bindings', 'leader', 'vim', 'remap', 'keyboard']
+        }
+      ],
       content: (
-        <div className="h-full">
+        <div className="h-full" {...settingsSearchTargetProps('shortcut-editor')}>
           <KeymapSettings
             vimMode={vimMode}
             overrides={keymapOverrides}
@@ -853,6 +1076,62 @@ export function SettingsModal(): JSX.Element {
       title: 'Typography',
       description: 'Fonts, line height, reading width, alignment, and line numbers.',
       keywords: ['font', 'size', 'line height', 'width', 'alignment', 'numbers'],
+      searchItems: [
+        {
+          id: 'interface-font',
+          title: 'Interface font',
+          description: 'Used for the sidebar, menus, and window chrome.',
+          keywords: ['font']
+        },
+        {
+          id: 'text-font',
+          title: 'Text font',
+          description: 'Used for editing and reading views.',
+          keywords: ['font']
+        },
+        {
+          id: 'monospace-font',
+          title: 'Monospace font',
+          description: 'Used for code blocks, inline code, and frontmatter.',
+          keywords: ['font', 'mono', 'code']
+        },
+        {
+          id: 'font-size',
+          title: 'Font size',
+          description: 'Editor and preview text size.',
+          keywords: ['size']
+        },
+        {
+          id: 'line-height',
+          title: 'Line height',
+          description: 'Editor and preview line spacing.',
+          keywords: ['spacing']
+        },
+        {
+          id: 'reading-width',
+          title: 'Reading width',
+          description: 'Maximum width for preview and split-preview content.',
+          keywords: ['width', 'preview']
+        },
+        {
+          id: 'editor-width',
+          title: 'Editor width',
+          description: 'Caps and centers the editor column so lines do not stretch edge-to-edge on large windows.',
+          keywords: ['width']
+        },
+        {
+          id: 'content-alignment',
+          title: 'Content alignment',
+          description: 'Center note content within the column or left-align it to the pane edge.',
+          keywords: ['alignment', 'center', 'left']
+        },
+        {
+          id: 'line-numbers',
+          title: 'Line numbers',
+          description: 'Show editor gutter numbers.',
+          keywords: ['numbers', 'gutter', 'relative', 'absolute']
+        }
+      ],
       content: (
         <div className="space-y-6">
           <Section
@@ -864,6 +1143,7 @@ export function SettingsModal(): JSX.Element {
               description="Used for the sidebar, menus, and window chrome."
               value={interfaceFont}
               options={systemFonts}
+              settingId="interface-font"
               onChange={setInterfaceFont}
             />
             <FontRow
@@ -871,6 +1151,7 @@ export function SettingsModal(): JSX.Element {
               description="Used for editing and reading views."
               value={textFont}
               options={systemFonts}
+              settingId="text-font"
               onChange={setTextFont}
             />
             <FontRow
@@ -878,6 +1159,7 @@ export function SettingsModal(): JSX.Element {
               description="Used for code blocks, inline code, and frontmatter."
               value={monoFont}
               options={systemFonts}
+              settingId="monospace-font"
               onChange={setMonoFont}
             />
           </Section>
@@ -894,6 +1176,7 @@ export function SettingsModal(): JSX.Element {
               max={32}
               step={1}
               unit="px"
+              settingId="font-size"
               onChange={setEditorFontSize}
             />
             <SliderRow
@@ -903,6 +1186,7 @@ export function SettingsModal(): JSX.Element {
               min={1.2}
               max={2.4}
               step={0.05}
+              settingId="line-height"
               onChange={setEditorLineHeight}
               format={(v) => v.toFixed(2)}
             />
@@ -914,6 +1198,7 @@ export function SettingsModal(): JSX.Element {
               max={1400}
               step={20}
               unit="px"
+              settingId="reading-width"
               onChange={setPreviewMaxWidth}
             />
             <SliderRow
@@ -924,12 +1209,14 @@ export function SettingsModal(): JSX.Element {
               max={1600}
               step={20}
               unit="px"
+              settingId="editor-width"
               onChange={setEditorMaxWidth}
             />
             <SegmentedRow
               label="Content alignment"
               description="Center note content within the column or left-align it to the pane edge."
               value={contentAlign}
+              settingId="content-alignment"
               options={[
                 { value: 'center', label: 'Center' },
                 { value: 'left', label: 'Left' }
@@ -940,6 +1227,7 @@ export function SettingsModal(): JSX.Element {
               label="Line numbers"
               description="Show editor gutter numbers. Relative uses Vim-style numbering with the current line shown normally."
               value={lineNumberMode}
+              settingId="line-numbers"
               options={[
                 { value: 'off', label: 'Off' },
                 { value: 'absolute', label: 'Absolute' },
@@ -956,13 +1244,79 @@ export function SettingsModal(): JSX.Element {
       title: 'Vault',
       description: 'Current vault location and root-folder controls.',
       keywords: ['folder', 'root', 'location', 'open vault', 'change'],
+      searchItems: [
+        {
+          id: 'vault-location',
+          title: 'Vault location',
+          description: 'ZenNotes reads markdown directly from the selected vault folder.',
+          keywords: ['folder', 'root', 'location', 'open vault', 'change']
+        },
+        {
+          id: 'saved-remote-workspaces',
+          title: 'Saved Remote Workspaces',
+          description: 'Keep multiple ZenNotes servers and vaults ready to reconnect.',
+          keywords: ['remote', 'server', 'workspace', 'connect'],
+          available: supportsRemoteWorkspace
+        },
+        {
+          id: 'primary-notes-location',
+          title: 'Primary notes location',
+          description: 'Choose whether ZenNotes treats `inbox/` as the main notes area or uses the vault root directly.',
+          keywords: ['primary notes', 'inbox', 'vault root']
+        },
+        {
+          id: 'enable-daily-notes',
+          title: 'Enable daily notes',
+          description: 'Adds a dedicated daily-notes workflow without changing ordinary note creation.',
+          keywords: ['daily notes']
+        },
+        {
+          id: 'daily-notes-directory',
+          title: 'Daily notes directory',
+          description: 'Stored inside your primary notes area.',
+          keywords: ['daily notes', 'directory', 'folder']
+        },
+        {
+          id: 'open-todays-daily-note',
+          title: "Open today's daily note",
+          description: "Opens today's note if it exists, otherwise creates it.",
+          keywords: ['daily notes', 'today']
+        },
+        {
+          id: 'inbox-label',
+          title: 'Inbox label',
+          description: 'Shown in the sidebar, breadcrumbs, commands, and note actions.',
+          keywords: ['system folders', 'folder label']
+        },
+        {
+          id: 'quick-notes-label',
+          title: 'Quick Notes label',
+          description: 'Display name for the quick-capture area.',
+          keywords: ['system folders', 'folder label', 'quick']
+        },
+        {
+          id: 'archive-label',
+          title: 'Archive label',
+          description: 'Display name for cold-storage notes.',
+          keywords: ['system folders', 'folder label']
+        },
+        {
+          id: 'trash-label',
+          title: 'Trash label',
+          description: 'Display name for deleted-note recovery.',
+          keywords: ['system folders', 'folder label']
+        }
+      ],
       content: (
         <div className="space-y-6">
           <Section
             title="Location"
             description="ZenNotes reads markdown directly from the selected vault folder."
           >
-            <div className="flex items-center justify-between gap-4 px-5 py-5">
+            <div
+              className="flex items-center justify-between gap-4 px-5 py-5"
+              {...settingsSearchTargetProps('vault-location')}
+            >
               <div className="min-w-0">
                 <div className="text-sm font-medium text-ink-900">
                   {workspaceMode === 'remote' ? 'Remote workspace' : 'Vault location'}
@@ -1002,7 +1356,7 @@ export function SettingsModal(): JSX.Element {
                   Open Local Vault…
                 </button>
               )}
-              {appInfo.runtime === 'desktop' && getZenBridge().getCapabilities().supportsRemoteWorkspace && (
+              {supportsRemoteWorkspace && (
                 <button
                   onClick={() => void connectRemoteWorkspace()}
                   className="shrink-0 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3.5 py-2 text-xs font-medium text-ink-800 transition-colors hover:bg-paper-200"
@@ -1013,10 +1367,11 @@ export function SettingsModal(): JSX.Element {
             </div>
           </Section>
 
-          {appInfo.runtime === 'desktop' && getZenBridge().getCapabilities().supportsRemoteWorkspace && (
+          {supportsRemoteWorkspace && (
             <Section
               title="Saved Remote Workspaces"
               description="Keep multiple ZenNotes servers and vaults ready to reconnect without re-entering URLs or tokens."
+              settingId="saved-remote-workspaces"
             >
               <div className="space-y-3 px-5 py-5">
                 <div className="flex items-center justify-between gap-4">
@@ -1102,6 +1457,7 @@ export function SettingsModal(): JSX.Element {
               label="Primary notes location"
               description="`Inbox` keeps ZenNotes' original lifecycle structure. `Vault root` surfaces top-level markdown files and folders directly."
               value={vaultSettings.primaryNotesLocation}
+              settingId="primary-notes-location"
               options={[
                 { value: 'inbox', label: 'Inbox' },
                 { value: 'root', label: 'Vault root' }
@@ -1123,6 +1479,7 @@ export function SettingsModal(): JSX.Element {
               label="Enable daily notes"
               description="Adds a dedicated daily-notes workflow without changing ordinary note creation."
               value={vaultSettings.dailyNotes.enabled}
+              settingId="enable-daily-notes"
               onChange={(enabled) =>
                 void persistVaultSettings({
                   ...vaultSettings,
@@ -1138,6 +1495,7 @@ export function SettingsModal(): JSX.Element {
               description="Stored inside your primary notes area. The default is `Daily Notes`."
               value={vaultSettings.dailyNotes.directory}
               placeholder={DEFAULT_DAILY_NOTES_DIRECTORY}
+              settingId="daily-notes-directory"
               onChange={(next) =>
                 void persistVaultSettings({
                   ...vaultSettings,
@@ -1148,7 +1506,10 @@ export function SettingsModal(): JSX.Element {
                 })
               }
             />
-            <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div
+              className="flex items-center justify-between gap-4 px-5 py-4"
+              {...settingsSearchTargetProps('open-todays-daily-note')}
+            >
               <div className="min-w-0">
                 <div className="text-sm font-medium text-ink-900">Open today's daily note</div>
                 <div className="mt-1 text-xs leading-5 text-ink-500">
@@ -1180,6 +1541,7 @@ export function SettingsModal(): JSX.Element {
               description="Shown in the sidebar, breadcrumbs, commands, and note actions."
               value={systemFolderLabels.inbox ?? ''}
               placeholder={DEFAULT_SYSTEM_FOLDER_LABELS.inbox}
+              settingId="inbox-label"
               onChange={(next) => setSystemFolderLabel('inbox', next)}
             />
             <TextInputRow
@@ -1187,6 +1549,7 @@ export function SettingsModal(): JSX.Element {
               description="Display name for the quick-capture area."
               value={systemFolderLabels.quick ?? ''}
               placeholder={DEFAULT_SYSTEM_FOLDER_LABELS.quick}
+              settingId="quick-notes-label"
               onChange={(next) => setSystemFolderLabel('quick', next)}
             />
             <TextInputRow
@@ -1194,6 +1557,7 @@ export function SettingsModal(): JSX.Element {
               description="Display name for cold-storage notes."
               value={systemFolderLabels.archive ?? ''}
               placeholder={DEFAULT_SYSTEM_FOLDER_LABELS.archive}
+              settingId="archive-label"
               onChange={(next) => setSystemFolderLabel('archive', next)}
             />
             <TextInputRow
@@ -1201,6 +1565,7 @@ export function SettingsModal(): JSX.Element {
               description="Display name for deleted-note recovery."
               value={systemFolderLabels.trash ?? ''}
               placeholder={DEFAULT_SYSTEM_FOLDER_LABELS.trash}
+              settingId="trash-label"
               onChange={(next) => setSystemFolderLabel('trash', next)}
             />
             <InlineNote>
@@ -1227,6 +1592,26 @@ export function SettingsModal(): JSX.Element {
         'agent',
         'model context protocol'
       ],
+      searchItems: [
+        {
+          id: 'mcp-server',
+          title: 'MCP server',
+          description: 'ZenNotes bundles a local MCP server that connected clients use.',
+          keywords: ['mcp', 'server', 'runtime', 'command']
+        },
+        {
+          id: 'mcp-integrations',
+          title: 'MCP integrations',
+          description: 'Pick the clients you want connected to this vault.',
+          keywords: ['mcp', 'claude', 'codex', 'client', 'install', 'uninstall']
+        },
+        {
+          id: 'mcp-instructions',
+          title: 'MCP instructions',
+          description: 'Edit the system prompt ZenNotes ships to any connected MCP client.',
+          keywords: ['mcp', 'prompt', 'instructions', 'system prompt']
+        }
+      ],
       content: <McpSettings />
     },
     {
@@ -1248,6 +1633,26 @@ export function SettingsModal(): JSX.Element {
         'capture',
         'developer'
       ],
+      searchItems: [
+        {
+          id: 'zen-command-line-tool',
+          title: 'zen command-line tool',
+          description: 'Install the `zen` shell command for terminal-based note workflows.',
+          keywords: ['cli', 'command line', 'terminal', 'shell', 'zen', 'install', 'path']
+        },
+        {
+          id: 'cli-quick-reference',
+          title: 'CLI quick reference',
+          description: 'A handful of the most useful `zen` commands.',
+          keywords: ['cli', 'help', 'commands', 'reference']
+        },
+        {
+          id: 'raycast-extension',
+          title: 'Raycast Extension',
+          description: 'Install the ZenNotes Raycast extension locally from this app.',
+          keywords: ['raycast', 'launcher', 'extension', 'install']
+        }
+      ],
       content: <CliSettings />
     },
     {
@@ -1255,15 +1660,38 @@ export function SettingsModal(): JSX.Element {
       title: 'About',
       description: 'App identity, version, updater status, and company information.',
       keywords: ['version', 'company', 'lumary', 'about', 'logo', 'updates'],
+      searchItems: [
+        {
+          id: 'zen-notes-version',
+          title: 'ZenNotes version',
+          description: 'App identity, current version, and product details.',
+          keywords: ['about', 'version', 'identity']
+        },
+        {
+          id: 'updates',
+          title: 'Updates',
+          description: 'Check GitHub releases for a newer ZenNotes build.',
+          keywords: ['release', 'download', 'install', 'updater']
+        },
+        {
+          id: 'lumary-labs',
+          title: 'Lumary Labs',
+          description: 'Company and product details.',
+          keywords: ['company', 'lumary', 'logo']
+        }
+      ],
       content: (
-        <Section title="ZenNotes">
+        <Section title="ZenNotes" settingId="zen-notes-version">
           <div className="px-5 py-5">
             <div className="min-w-0 text-sm leading-6 text-ink-600">
               <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center">
                 <span className="font-medium text-ink-900">ZenNotes</span>
                 <span className="text-xs text-ink-500">v{appInfo.version}</span>
               </div>
-              <div className="mx-auto mt-5 max-w-[44rem] rounded-2xl border border-paper-300/65 bg-paper-50/65 p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
+              <div
+                className="mx-auto mt-5 max-w-[44rem] rounded-2xl border border-paper-300/65 bg-paper-50/65 p-4 text-left shadow-[0_10px_30px_rgba(15,23,42,0.04)]"
+                {...settingsSearchTargetProps('updates')}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-ink-500">
@@ -1378,7 +1806,10 @@ export function SettingsModal(): JSX.Element {
                 </a>{' '}
                 for company and product details.
               </p>
-              <div className="mt-4 flex flex-col items-center gap-1.5 border-t border-paper-300/55 pt-4 text-center">
+              <div
+                className="mt-4 flex flex-col items-center gap-1.5 border-t border-paper-300/55 pt-4 text-center"
+                {...settingsSearchTargetProps('lumary-labs')}
+              >
                 <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-ink-500">
                   Built by
                 </span>
@@ -1412,16 +1843,14 @@ export function SettingsModal(): JSX.Element {
   ]
 
   const query = navQuery.trim().toLowerCase()
-  const filteredCategories = query
-    ? categories.filter((category) =>
-        [category.title, category.description, ...category.keywords].some((value) =>
-          value.toLowerCase().includes(query)
-        )
-      )
-    : categories
+  const searchResults = getSettingsSearchResults(categories, query)
+  const visibleSearchResult =
+    searchResults.find((result) => result.id === activeSearchResultId) ??
+    searchResults.find((result) => result.category.id === activeCategory) ??
+    searchResults[0] ??
+    null
   const visibleCategory =
-    filteredCategories.find((category) => category.id === activeCategory) ??
-    filteredCategories[0] ??
+    visibleSearchResult?.category ??
     null
 
   return (
@@ -1470,13 +1899,19 @@ export function SettingsModal(): JSX.Element {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
             <nav className="space-y-1">
-              {filteredCategories.map((category) => {
-                const selected = visibleCategory?.id === category.id
+              {searchResults.map((result) => {
+                const selected = visibleSearchResult?.id === result.id
                 return (
                   <button
-                    key={category.id}
+                    key={result.id}
                     type="button"
-                    onClick={() => setActiveCategory(category.id)}
+                    onClick={() => {
+                      setActiveCategory(result.category.id)
+                      setActiveSearchResultId(result.id)
+                      if (result.type === 'setting') {
+                        jumpToSettingsSearchTarget(result.targetId)
+                      }
+                    }}
                     className={[
                       'w-full rounded-xl px-3 py-2.5 text-left transition-colors',
                       selected
@@ -1484,16 +1919,23 @@ export function SettingsModal(): JSX.Element {
                         : 'text-ink-600 hover:bg-paper-200/45 hover:text-ink-900'
                     ].join(' ')}
                   >
-                    <div className="text-sm font-medium">{category.title}</div>
+                    <div className="flex min-w-0 items-center justify-between gap-2">
+                      <div className="truncate text-sm font-medium">{result.title}</div>
+                      {result.type === 'setting' && (
+                        <span className="shrink-0 rounded-full border border-paper-300/60 bg-paper-100/70 px-2 py-0.5 text-[10px] font-medium text-ink-500">
+                          {result.category.title}
+                        </span>
+                      )}
+                    </div>
                     <div className="mt-1 line-clamp-2 text-[11px] leading-5 text-ink-500">
-                      {category.description}
+                      {result.description}
                     </div>
                   </button>
                 )
               })}
-              {filteredCategories.length === 0 && (
+              {searchResults.length === 0 && (
                 <div className="rounded-xl border border-dashed border-paper-300/70 px-3 py-4 text-sm text-ink-500">
-                  No settings sections match your search.
+                  No settings match your search.
                 </div>
               )}
             </nav>
@@ -1855,14 +2297,16 @@ function KeymapRecorderModal({
 function Section({
   title,
   description,
+  settingId,
   children
 }: {
   title: string
   description?: string
+  settingId?: string
   children: React.ReactNode
 }): JSX.Element {
   return (
-    <section className="space-y-3">
+    <section className="space-y-3" {...settingsSearchTargetProps(settingId)}>
       <div>
         <div className="text-[11px] font-medium uppercase tracking-[0.2em] text-ink-500">
           {title}
@@ -1908,7 +2352,7 @@ function formatAcceleratorForDisplay(accelerator: string): string {
     .join(mac ? '' : '+')
 }
 
-function QuickCaptureHotkeyRow(): JSX.Element {
+function QuickCaptureHotkeyRow({ settingId }: { settingId?: string } = {}): JSX.Element {
   const [current, setCurrent] = useState<string>('')
   const [recording, setRecording] = useState(false)
   const [draft, setDraft] = useState<string>('')
@@ -1965,7 +2409,10 @@ function QuickCaptureHotkeyRow(): JSX.Element {
 
   const display = draft || current
   return (
-    <div className="flex flex-col gap-2 px-5 py-4">
+    <div
+      className="flex flex-col gap-2 px-5 py-4"
+      {...settingsSearchTargetProps(settingId)}
+    >
       <div className="flex items-center justify-between gap-5">
         <div className="min-w-0">
           <div className="text-sm font-medium text-ink-900">Quick capture hotkey</div>
@@ -2052,16 +2499,21 @@ function TextInputRow({
   description,
   value,
   placeholder,
+  settingId,
   onChange
 }: {
   label: string
   description?: string
   value: string
   placeholder?: string
+  settingId?: string
   onChange: (next: string | null) => void
 }): JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-5 px-5 py-4">
+    <div
+      className="flex items-center justify-between gap-5 px-5 py-4"
+      {...settingsSearchTargetProps(settingId)}
+    >
       <div className="min-w-0">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && <div className="mt-1 text-xs leading-5 text-ink-500">{description}</div>}
@@ -2084,12 +2536,14 @@ function FontRow({
   description,
   value,
   options,
+  settingId,
   onChange
 }: {
   label: string
   description?: string
   value: string | null
   options: string[]
+  settingId?: string
   onChange: (next: string | null) => void
 }): JSX.Element {
   const [open, setOpen] = useState(false)
@@ -2206,7 +2660,10 @@ function FontRow({
   }
 
   return (
-    <div className="flex items-center justify-between gap-5 px-5 py-4">
+    <div
+      className="flex items-center justify-between gap-5 px-5 py-4"
+      {...settingsSearchTargetProps(settingId)}
+    >
       <div className="min-w-0">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && <div className="mt-1 text-xs leading-5 text-ink-500">{description}</div>}
@@ -2323,6 +2780,7 @@ function SliderRow({
   step,
   unit,
   format,
+  settingId,
   onChange
 }: {
   label: string
@@ -2333,11 +2791,15 @@ function SliderRow({
   step: number
   unit?: string
   format?: (v: number) => string
+  settingId?: string
   onChange: (next: number) => void
 }): JSX.Element {
   const display = (format ? format(value) : String(value)) + (unit && !format ? unit : '')
   return (
-    <div className="flex items-center justify-between gap-5 px-5 py-4">
+    <div
+      className="flex items-center justify-between gap-5 px-5 py-4"
+      {...settingsSearchTargetProps(settingId)}
+    >
       <div className="min-w-0">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && <div className="mt-1 text-xs leading-5 text-ink-500">{description}</div>}
@@ -2369,6 +2831,7 @@ function NumberRow({
   step,
   unit,
   format,
+  settingId,
   onChange
 }: {
   label: string
@@ -2379,12 +2842,16 @@ function NumberRow({
   step: number
   unit?: string
   format?: (v: number) => string
+  settingId?: string
   onChange: (next: number) => void
 }): JSX.Element {
   const display = (format ? format(value) : String(value)) + (unit ?? '')
   const clamp = (n: number): number => Math.min(max, Math.max(min, n))
   return (
-    <div className="flex items-center justify-between gap-4 px-6 py-3">
+    <div
+      className="flex items-center justify-between gap-4 px-6 py-3"
+      {...settingsSearchTargetProps(settingId)}
+    >
       <div className="min-w-0">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && <div className="text-xs text-ink-500">{description}</div>}
@@ -2416,15 +2883,20 @@ function ToggleRow({
   label,
   description,
   value,
+  settingId,
   onChange
 }: {
   label: string
   description?: string
   value: boolean
+  settingId?: string
   onChange: (next: boolean) => void
 }): JSX.Element {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-5 px-5 py-4">
+    <label
+      className="flex cursor-pointer items-center justify-between gap-5 px-5 py-4"
+      {...settingsSearchTargetProps(settingId)}
+    >
       <div className="min-w-0">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && <div className="mt-1 text-xs leading-5 text-ink-500">{description}</div>}
@@ -2455,16 +2927,21 @@ function SegmentedRow<T extends string>({
   description,
   value,
   options,
+  settingId,
   onChange
 }: {
   label: string
   description?: string
   value: T
   options: { value: T; label: string }[]
+  settingId?: string
   onChange: (next: T) => void
 }): JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-5 px-5 py-4">
+    <div
+      className="flex items-center justify-between gap-5 px-5 py-4"
+      {...settingsSearchTargetProps(settingId)}
+    >
       <div className="min-w-0">
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && <div className="mt-1 text-xs leading-5 text-ink-500">{description}</div>}
@@ -2542,7 +3019,11 @@ function CliSettings(): JSX.Element {
   if (status == null) {
     return (
       <div className="space-y-6">
-        <Section title="Command-Line Tool" description="Install the `zen` shell command for terminal-based note workflows.">
+        <Section
+          title="Command-Line Tool"
+          description="Install the `zen` shell command for terminal-based note workflows."
+          settingId="zen-command-line-tool"
+        >
           <InlineNote>Checking install status…</InlineNote>
         </Section>
       </div>
@@ -2552,7 +3033,11 @@ function CliSettings(): JSX.Element {
   if (!status.supportedPlatform) {
     return (
       <div className="space-y-6">
-        <Section title="Command-Line Tool" description="Install the `zen` shell command for terminal-based note workflows.">
+        <Section
+          title="Command-Line Tool"
+          description="Install the `zen` shell command for terminal-based note workflows."
+          settingId="zen-command-line-tool"
+        >
           <InlineNote>{status.reason ?? 'Not supported on this platform yet.'}</InlineNote>
         </Section>
       </div>
@@ -2574,6 +3059,7 @@ function CliSettings(): JSX.Element {
       <Section
         title="Command-Line Tool"
         description="The `zen` CLI talks to your vault directly from any terminal — perfect for scripts, cron jobs, editor plugins, shell pipelines, MCP, and launcher integrations like Raycast. Once installed, try `zen --help` or pipe text in: `pbpaste | zen capture`."
+        settingId="zen-command-line-tool"
       >
         <div className="flex flex-col gap-3 px-5 py-4">
           <div className="flex items-start justify-between gap-4">
@@ -2682,6 +3168,7 @@ function CliSettings(): JSX.Element {
       <Section
         title="Quick reference"
         description="A handful of the most useful commands. Quote paths with spaces, or pass them with `--path`. Run `zen --help` for the full list."
+        settingId="cli-quick-reference"
       >
         <div className="space-y-2 px-5 py-4 font-mono text-[12px] leading-6 text-ink-800">
           <div>zen list --tag idea</div>
@@ -2746,6 +3233,7 @@ function RaycastExtensionSettings({
       <Section
         title="Raycast Extension"
         description="Install the ZenNotes Raycast extension locally from this app instead of waiting for the Raycast Store review."
+        settingId="raycast-extension"
       >
         <InlineNote>Checking Raycast status…</InlineNote>
       </Section>
@@ -2772,6 +3260,7 @@ function RaycastExtensionSettings({
     <Section
       title="Raycast Extension"
       description="Install the ZenNotes Raycast extension locally from this app instead of waiting for the Raycast Store review."
+      settingId="raycast-extension"
     >
       <div className="flex flex-col gap-3 px-5 py-4">
         <div className="flex items-start justify-between gap-4">
@@ -2949,6 +3438,7 @@ function McpSettings(): JSX.Element {
       <Section
         title="Server"
         description="ZenNotes bundles a local MCP server that every client below connects to. It uses the packaged Electron binary in plain-Node mode, so no separate Node install is required."
+        settingId="mcp-server"
       >
         <div className="px-5 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2997,6 +3487,7 @@ function McpSettings(): JSX.Element {
       <Section
         title="Integrations"
         description={"Pick the clients you want connected to this vault. Install writes a managed ZenNotes entry into that client\u2019s config; Uninstall removes just that entry."}
+        settingId="mcp-integrations"
       >
         {statuses == null ? (
           <InlineNote>{'Checking integration status\u2026'}</InlineNote>
@@ -3089,6 +3580,7 @@ function McpInstructionsEditor(): JSX.Element {
     <Section
       title="Instructions"
       description="The system prompt ZenNotes ships to any connected MCP client. Edit it to change how the AI writes, structures, and styles your notes. Changes take effect on the next MCP session."
+      settingId="mcp-instructions"
     >
       <div className="space-y-3 px-5 py-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
