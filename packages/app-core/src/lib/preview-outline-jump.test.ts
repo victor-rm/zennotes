@@ -7,7 +7,10 @@ import {
   nextOutlinePreviewSyncLockUntil,
   outlineHeadingTextOffset,
   previewScrollTopForHeading,
-  scrollTopForElementRelativeTop
+  scrollTopForElementRelativeTop,
+  scrollTopForScrollRatio,
+  shouldSyncPreviewAfterMarkdownSettles,
+  shouldSyncPreviewFromEditorViewport
 } from './preview-outline-jump'
 import type { OutlineItem } from './outline'
 
@@ -69,9 +72,30 @@ describe('preview outline jump helpers', () => {
     expect(previewScrollTopForHeading(preview, heading, 24)).toBe(700)
   })
 
+  it('maps continuous scroll by ratio for smooth split-pane sync', () => {
+    expect(scrollTopForScrollRatio(250, 1000, 500, 2000, 1000)).toBe(500)
+    expect(scrollTopForScrollRatio(1200, 1000, 500, 2000, 1000)).toBe(1000)
+    expect(scrollTopForScrollRatio(250, 500, 500, 2000, 1000)).toBe(0)
+    expect(scrollTopForScrollRatio(250, 1000, 500, 1000, 1000)).toBe(0)
+  })
+
   it('extends the outline preview sync lock without shortening an active lock', () => {
     expect(nextOutlinePreviewSyncLockUntil(100, 450, 0)).toBe(550)
     expect(nextOutlinePreviewSyncLockUntil(125, 100, 550)).toBe(550)
     expect(nextOutlinePreviewSyncLockUntil(600, 100, 550)).toBe(700)
+  })
+
+  it('waits for current split preview markdown before resyncing after render', () => {
+    expect(shouldSyncPreviewAfterMarkdownSettles('split', true, false)).toBe(true)
+    expect(shouldSyncPreviewAfterMarkdownSettles('split', true, true)).toBe(false)
+    expect(shouldSyncPreviewAfterMarkdownSettles('edit', true, false)).toBe(false)
+    expect(shouldSyncPreviewAfterMarkdownSettles('split', false, false)).toBe(false)
+  })
+
+  it('allows editor-driven preview sync only when the current preview can move', () => {
+    expect(shouldSyncPreviewFromEditorViewport('split', true, false, false)).toBe(true)
+    expect(shouldSyncPreviewFromEditorViewport('split', true, true, false)).toBe(false)
+    expect(shouldSyncPreviewFromEditorViewport('split', true, false, true)).toBe(false)
+    expect(shouldSyncPreviewFromEditorViewport('preview', true, false, false)).toBe(false)
   })
 })

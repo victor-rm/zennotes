@@ -92,6 +92,11 @@ import {
   readImageBlockDragPayload
 } from '../lib/image-block-dnd'
 import { useSettledMarkdown } from '../lib/use-rendered-markdown'
+import {
+  isEditorReadyForContent,
+  shouldDeferEditorHydration,
+  type EditorHydrationState
+} from '../lib/editor-hydration'
 import { recordRendererPerf } from '../lib/perf'
 import { parseOutline } from '../lib/outline'
 import {
@@ -99,7 +104,8 @@ import {
   nextOutlinePreviewSyncLockUntil,
   outlineHeadingTextOffset,
   previewScrollTopForHeading,
-  scrollTopForElementRelativeTop
+  scrollTopForScrollRatio,
+  shouldSyncPreviewFromEditorViewport
 } from '../lib/preview-outline-jump'
 import {
   ArchiveIcon,
@@ -569,10 +575,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     y: number
     hasSelection: boolean
   } | null>(null)
-  const [editorHydration, setEditorHydration] = useState<{
-    path: string
-    ready: boolean
-  } | null>(null)
+  const [editorHydration, setEditorHydration] = useState<EditorHydrationState | null>(null)
   const [assetDropActive, setAssetDropActive] = useState(false)
   const [imageDropIndicatorTop, setImageDropIndicatorTop] = useState<number | null>(null)
   const [tabStripOverflowing, setTabStripOverflowing] = useState(false)
@@ -595,6 +598,11 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   const pendingPreviewOutlineJumpLineRef = useRef<number | null>(null)
   const outlinePreviewJumpFrameRef = useRef<number | null>(null)
   const outlinePreviewSyncLockUntilRef = useRef(0)
+  const previewIsStaleRef = useRef(false)
+  const modeRef = useRef<PaneMode>(mode)
+  const hasContentRef = useRef(false)
+  const editorViewportSyncFrameRef = useRef<number | null>(null)
+  const syncPreviewToEditorScrollRef = useRef<() => boolean>(() => false)
   const activeOutlineLineRef = useRef<number | null>(null)
   const activeOutlineFrameRef = useRef<number | null>(null)
   const selectionActionFrameRef = useRef<number | null>(null)
@@ -765,6 +773,45 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     return true
   }, [content?.body, lockOutlinePreviewSync, mode])
 
+  const syncPreviewToEditorScroll = useCallback((): boolean => {
+    const view = viewRef.current
+    const editorEl = view?.scrollDOM
+    const previewEl = previewScrollRef.current
+    if (!view || !editorEl || !previewEl) return false
+
+    const nextTop = scrollTopForScrollRatio(
+      editorEl.scrollTop,
+      editorEl.scrollHeight,
+      editorEl.clientHeight,
+      previewEl.scrollHeight,
+      previewEl.clientHeight
+    )
+    if (Math.abs(previewEl.scrollTop - nextTop) < 1) return true
+    ignorePreviewScrollRef.current = true
+    previewEl.scrollTop = nextTop
+    return true
+  }, [])
+  syncPreviewToEditorScrollRef.current = syncPreviewToEditorScroll
+
+  const canSyncPreviewFromEditorViewport = useCallback((): boolean => {
+    return shouldSyncPreviewFromEditorViewport(
+      modeRef.current,
+      hasContentRef.current,
+      previewIsStaleRef.current,
+      performance.now() < outlinePreviewSyncLockUntilRef.current
+    )
+  }, [])
+
+  const schedulePreviewSyncFromEditorViewport = useCallback((): void => {
+    if (!canSyncPreviewFromEditorViewport()) return
+    if (editorViewportSyncFrameRef.current != null) return
+    editorViewportSyncFrameRef.current = requestAnimationFrame(() => {
+      editorViewportSyncFrameRef.current = null
+      if (!canSyncPreviewFromEditorViewport()) return
+      syncPreviewToEditorScrollRef.current()
+    })
+  }, [canSyncPreviewFromEditorViewport])
+
   const schedulePreviewOutlineJump = useCallback((line: number): void => {
     if (mode !== 'split') return
     lockOutlinePreviewSync()
@@ -781,12 +828,23 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
   }, [lockOutlinePreviewSync, mode, scrollPreviewToOutlineLine])
 
   const handlePreviewRendered = useCallback((): void => {
+    if (previewIsStaleRef.current) return
     const pendingLine = pendingPreviewOutlineJumpLineRef.current
-    if (pendingLine == null) return
-    if (scrollPreviewToOutlineLine(pendingLine)) {
-      pendingPreviewOutlineJumpLineRef.current = null
+    if (pendingLine != null) {
+      if (scrollPreviewToOutlineLine(pendingLine)) {
+        pendingPreviewOutlineJumpLineRef.current = null
+      }
+      return
     }
-  }, [scrollPreviewToOutlineLine])
+    if (!canSyncPreviewFromEditorViewport()) return
+    syncPreviewToEditorScroll()
+  }, [
+    canSyncPreviewFromEditorViewport,
+    content?.path,
+    mode,
+    syncPreviewToEditorScroll,
+    scrollPreviewToOutlineLine
+  ])
 
   useEffect(() => {
     pendingPreviewOutlineJumpLineRef.current = null
@@ -919,9 +977,12 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       return
     }
 
-    const shouldDefer =
-      mode !== 'preview' &&
-      content.body.length >= LARGE_DOC_LIVE_PREVIEW_DEFER_CHARS
+    const shouldDefer = shouldDeferEditorHydration(
+      mode !== 'preview',
+      mode,
+      content.body.length,
+      LARGE_DOC_LIVE_PREVIEW_DEFER_CHARS
+    )
     if (!shouldDefer) {
       setEditorHydration((current) =>
         current?.path === content.path && current.ready
@@ -1046,6 +1107,10 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         if (selectionActionFrameRef.current != null) {
           cancelAnimationFrame(selectionActionFrameRef.current)
           selectionActionFrameRef.current = null
+        }
+        if (editorViewportSyncFrameRef.current != null) {
+          cancelAnimationFrame(editorViewportSyncFrameRef.current)
+          editorViewportSyncFrameRef.current = null
         }
         if (deferredLivePreviewTimerRef.current != null) {
           clearTimeout(deferredLivePreviewTimerRef.current)
@@ -1194,6 +1259,9 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
             if (upd.selectionSet || upd.docChanged || upd.focusChanged || upd.viewportChanged || upd.geometryChanged) {
               scheduleSelectionCommentAction(upd.view)
             }
+            if (upd.viewportChanged || upd.geometryChanged) {
+              schedulePreviewSyncFromEditorViewport()
+            }
             if (!upd.docChanged) return
             if (upd.transactions.some((tr: Transaction) => tr.annotation(programmatic))) return
             const path = viewPathRef.current
@@ -1237,6 +1305,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     [
       openEditorContextMenu,
       paneId,
+      schedulePreviewSyncFromEditorViewport,
       scheduleSelectionCommentAction,
       setActiveCommentId,
       setActivePane,
@@ -1329,6 +1398,10 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       effects: effects.length > 0 ? effects : undefined,
       selection: pathChanged ? { anchor: 0 } : { anchor: clampedAnchor, head: clampedHead }
     })
+    if (pathChanged && pendingJumpLocation?.path !== nextPath) {
+      view.scrollDOM.scrollTop = 0
+      previewScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' })
+    }
     recordRendererPerf('editor.doc.sync', performance.now() - dispatchStartedAt, {
       chars: nextBody.length,
       deferred: deferRichMarkdown,
@@ -1367,7 +1440,7 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
         })
       }, LARGE_DOC_LIVE_PREVIEW_DEFER_MS)
     }
-  }, [content?.body, content?.path, livePreview])
+  }, [content?.body, content?.path, livePreview, pendingJumpLocation?.path])
 
   useEffect(() => {
     if (!content) return
@@ -1457,82 +1530,44 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
     const previewEl = previewScrollRef.current
     if (!editorEl || !previewEl) return
 
-    const getScrollRatio = (el: HTMLElement): number => {
-      const max = el.scrollHeight - el.clientHeight
-      if (max <= 0) return 0
-      return Math.max(0, Math.min(1, el.scrollTop / max))
-    }
     const syncByRatio = (
       source: HTMLElement,
       target: HTMLElement,
       targetKind: 'editor' | 'preview'
     ): void => {
-      const targetMax = target.scrollHeight - target.clientHeight
-      const nextTop = targetMax <= 0 ? 0 : getScrollRatio(source) * targetMax
+      const nextTop = scrollTopForScrollRatio(
+        source.scrollTop,
+        source.scrollHeight,
+        source.clientHeight,
+        target.scrollHeight,
+        target.clientHeight
+      )
       if (Math.abs(target.scrollTop - nextTop) < 1) return
       if (targetKind === 'editor') ignoreEditorScrollRef.current = true
       else ignorePreviewScrollRef.current = true
       target.scrollTop = nextTop
-    }
-    const setSyncedScrollTop = (
-      target: HTMLElement,
-      nextTop: number,
-      targetKind: 'editor' | 'preview'
-    ): void => {
-      if (Math.abs(target.scrollTop - nextTop) < 1) return
-      if (targetKind === 'editor') ignoreEditorScrollRef.current = true
-      else ignorePreviewScrollRef.current = true
-      target.scrollTop = nextTop
-    }
-    const syncPreviewByVisibleHeading = (): boolean => {
-      const view = viewRef.current
-      if (!view) return false
-      const items = parseOutline(view.state.doc.toString())
-      if (items.length === 0) return false
-
-      const editorRect = editorEl.getBoundingClientRect()
-      const viewportTop = editorRect.top
-      const viewportBottom = editorRect.bottom
-      for (const item of items) {
-        if (item.line > view.state.doc.lines) break
-        const line = view.state.doc.line(item.line)
-        const pos = Math.min(line.to, line.from + outlineHeadingTextOffset(line.text))
-        const coords = view.coordsAtPos(pos)
-        if (!coords) continue
-        if (coords.bottom < viewportTop || coords.top > viewportBottom) continue
-
-        const heading = findRenderedHeadingForOutlineLine(previewEl, items, item.line)
-        if (!heading) return false
-        const nextTop = scrollTopForElementRelativeTop(
-          previewEl,
-          heading,
-          coords.top - editorRect.top
-        )
-        setSyncedScrollTop(previewEl, nextTop, 'preview')
-        return true
-      }
-
-      return false
     }
     const onEditorScroll = (): void => {
       if (ignoreEditorScrollRef.current) {
         ignoreEditorScrollRef.current = false
         return
       }
-      if (performance.now() < outlinePreviewSyncLockUntilRef.current) return
-      if (!syncPreviewByVisibleHeading()) syncByRatio(editorEl, previewEl, 'preview')
+      if (!canSyncPreviewFromEditorViewport()) return
+      syncPreviewToEditorScroll()
     }
     const onPreviewScroll = (): void => {
       if (ignorePreviewScrollRef.current) {
         ignorePreviewScrollRef.current = false
         return
       }
+      if (!canSyncPreviewFromEditorViewport()) return
       syncByRatio(previewEl, editorEl, 'editor')
     }
     editorEl.addEventListener('scroll', onEditorScroll, { passive: true })
     previewEl.addEventListener('scroll', onPreviewScroll, { passive: true })
     const raf = requestAnimationFrame(() => {
-      if (!syncPreviewByVisibleHeading()) syncByRatio(editorEl, previewEl, 'preview')
+      if (!canSyncPreviewFromEditorViewport()) return
+      syncPreviewToEditorScroll()
     })
     return () => {
       cancelAnimationFrame(raf)
@@ -1542,7 +1577,14 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       ignorePreviewScrollRef.current = false
       outlinePreviewSyncLockUntilRef.current = 0
     }
-  }, [content?.path, mode])
+  }, [
+    canSyncPreviewFromEditorViewport,
+    content?.path,
+    editorHydration?.path,
+    editorHydration?.ready,
+    mode,
+    syncPreviewToEditorScroll
+  ])
 
   // Apply pendingJumpLocation — only for the active pane.
   useEffect(() => {
@@ -2453,15 +2495,29 @@ export function EditorPane({ pane }: { pane: PaneLeaf }): JSX.Element {
       ? 'min-h-10 flex-wrap content-start overflow-x-hidden overflow-y-visible'
       : `${tabStripOverflowing ? 'h-14 overflow-x-auto' : 'h-10 overflow-x-hidden'} overflow-y-hidden`
   ].join(' ')
-  const editorReady =
-    !content ||
-    !showEditor ||
-    (editorHydration?.path === content.path && editorHydration.ready)
-  const previewSourceMarkdown = showPreview ? content?.body ?? '' : ''
-  const { settledMarkdown: previewMarkdown } = useSettledMarkdown(
-    previewSourceMarkdown,
-    splitMode ? 75 : 0
+  const deferEditorHydration = shouldDeferEditorHydration(
+    showEditor,
+    mode,
+    content?.body.length ?? 0,
+    LARGE_DOC_LIVE_PREVIEW_DEFER_CHARS
   )
+  const editorReady = isEditorReadyForContent(
+    content != null,
+    showEditor,
+    deferEditorHydration,
+    content?.path ?? null,
+    editorHydration
+  )
+  const previewSourceMarkdown = showPreview ? content?.body ?? '' : ''
+  const previewSettleKey = showPreview && content ? content.path : ''
+  const { settledMarkdown: previewMarkdown, isStale: previewIsStale } = useSettledMarkdown(
+    previewSourceMarkdown,
+    splitMode ? 75 : 0,
+    previewSettleKey
+  )
+  modeRef.current = mode
+  hasContentRef.current = content != null
+  previewIsStaleRef.current = previewIsStale
 
   const handlePreviewRequestEdit = useCallback(() => {
     if (mode === 'preview') {
