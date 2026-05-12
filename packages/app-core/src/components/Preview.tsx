@@ -15,8 +15,10 @@ import { enhancePreviewHeadingFolds } from "../lib/preview-heading-fold";
 import { renderDiagrams } from "../lib/diagram-renderers";
 import {
   CODE_COPY_BUTTON_SELECTOR,
+  CODE_FOLD_BUTTON_SELECTOR,
   copyCodeBlockToClipboard,
   enhanceCodeBlockCopy,
+  toggleCodeBlockFold,
 } from "../lib/code-block-copy";
 import { NoteHoverPreview } from "./NoteHoverPreview";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -462,6 +464,15 @@ export const Preview = memo(function Preview({
         copyCodeBlockToClipboard(copyButton);
         return;
       }
+      const foldButton = target.closest<HTMLButtonElement>(
+        CODE_FOLD_BUTTON_SELECTOR,
+      );
+      if (foldButton) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleCodeBlockFold(foldButton);
+        return;
+      }
 
       const expandButton = target.closest(
         ".zen-diagram-expand",
@@ -631,7 +642,7 @@ export const Preview = memo(function Preview({
     });
 
     enhancePreviewHeadingFolds(stage);
-    enhanceCodeBlockCopy(stage);
+    enhanceCodeBlockCopy(stage, { notePath });
 
     stage
       .querySelectorAll<HTMLInputElement>('li.task-list-item input[type="checkbox"]')

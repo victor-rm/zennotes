@@ -1867,16 +1867,34 @@ textarea,
 .prose-zen .zen-code-block {
   position: relative;
   margin: var(--z-prose-block-gap) 0;
+  background: theme("colors.paper.200");
+  border: 1px solid theme("colors.paper.300");
+  border-radius: 10px;
+  overflow: hidden;
 }
 .prose-zen .zen-code-block pre {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   margin: 0;
-  padding-top: 38px;
+  padding: 42px 16px 14px;
 }
-.prose-zen .zen-code-copy-button {
+.prose-zen .zen-code-block[data-code-folded="true"] pre {
+  display: none;
+}
+.prose-zen .zen-code-block-toolbar {
   position: absolute;
   top: 8px;
   right: 8px;
+  left: 8px;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.prose-zen .zen-code-fold-button,
+.prose-zen .zen-code-copy-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1906,11 +1924,13 @@ textarea,
     border-color 120ms ease,
     color 120ms ease;
 }
+.prose-zen .zen-code-fold-button:hover,
 .prose-zen .zen-code-copy-button:hover {
   background: theme("colors.paper.50");
   border-color: theme("colors.paper.400");
   color: theme("colors.ink.900");
 }
+.prose-zen .zen-code-fold-button:focus-visible,
 .prose-zen .zen-code-copy-button:focus-visible {
   outline: 2px solid rgb(var(--z-accent) / 0.45);
   outline-offset: 2px;
@@ -1924,6 +1944,25 @@ textarea,
   background: rgb(var(--z-red) / 0.08);
   border-color: rgb(var(--z-red) / 0.45);
   color: rgb(var(--z-red));
+}
+.prose-zen .zen-code-block-summary {
+  display: none;
+  padding: 42px 16px 14px;
+  color: theme("colors.ink.500");
+  font-family: var(
+    --z-interface-font,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    Inter,
+    system-ui,
+    sans-serif
+  );
+  font-size: 12px;
+  line-height: 1.4;
+}
+.prose-zen .zen-code-block[data-code-folded="true"] .zen-code-block-summary {
+  display: block;
 }
 .prose-zen table {
   border-collapse: collapse;
