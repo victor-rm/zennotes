@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -440,6 +440,27 @@ describe('listNotes metadata parsing', () => {
     expect(byPath.get(imageRel)?.hasAttachments).toBe(true)
     expect(byPath.get(embedRel)?.hasAttachments).toBe(true)
     expect(byPath.get(embedRel)?.wikilinks).toEqual([])
+  })
+})
+
+describe('listNotes symlinks', () => {
+  it('lists a note reached through a symlink into the vault', async () => {
+    const root = await makeTempDir('zennotes-symlink-')
+    await ensureVaultLayout(root)
+    const srcDir = await makeTempDir('zennotes-symlink-src-')
+    const external = path.join(srcDir, 'External.md')
+    await writeFile(external, '# External\n\nlinked body\n', 'utf8')
+
+    const link = path.join(root, 'inbox', 'Linked.md')
+    try {
+      await symlink(external, link)
+    } catch {
+      // Creating symlinks can require privileges (e.g. Windows); skip there.
+      return
+    }
+
+    const notes = await listNotes(root)
+    expect(notes.some((note) => note.path === 'inbox/Linked.md')).toBe(true)
   })
 })
 

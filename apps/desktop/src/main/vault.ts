@@ -1328,6 +1328,24 @@ function noteFolderFromRelPath(relPath: string): NoteFolder | null {
   return folderForRelativePath(relPath)
 }
 
+// A directory entry counts as a markdown note when it's a real .md file
+// or a symlink that resolves to one. readdir's Dirent reports a symlink
+// as isSymbolicLink() (never isFile()), so without this stat fallback a
+// note symlinked into the vault is invisible. Symlinked directories are
+// intentionally not followed (to avoid cycles into arbitrary trees).
+async function isMarkdownNoteEntry(full: string, entry: Dirent): Promise<boolean> {
+  if (!entry.name.toLowerCase().endsWith('.md')) return false
+  if (entry.isFile()) return true
+  if (entry.isSymbolicLink()) {
+    try {
+      return (await fs.stat(full)).isFile()
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
 async function collectBuiltinSearchCandidates(root: string): Promise<VaultTextSearchCandidate[]> {
   const files: Array<{ full: string; folder: NoteFolder }> = []
   const walkFolder = async (
@@ -1351,7 +1369,7 @@ async function collectBuiltinSearchCandidates(root: string): Promise<VaultTextSe
         await walkFolder(folder, full, topAbs, isPrimaryRoot)
         continue
       }
-      if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) continue
+      if (!(await isMarkdownNoteEntry(full, entry))) continue
       files.push({ full, folder })
     }
   }
@@ -1757,7 +1775,7 @@ export async function listNotes(root: string): Promise<NoteMeta[]> {
         await walkFolder(folder, full, topAbs, isPrimaryRoot)
         continue
       }
-      if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+      if (await isMarkdownNoteEntry(full, entry)) {
         noteFiles.push({ full, folder, siblingOrder: index })
       }
     }
