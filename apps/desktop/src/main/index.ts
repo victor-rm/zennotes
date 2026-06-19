@@ -45,6 +45,7 @@ import {
   archiveNote,
   createFolder,
   createNote,
+  createExcalidraw,
   deleteAsset,
   DEFAULT_QUICK_CAPTURE_HOTKEY,
   deleteFolder,
@@ -82,6 +83,7 @@ import {
   searchVaultTextCapabilities,
   searchVaultText,
   setVaultSettings,
+  rootContentHiddenByInboxMode,
   type PersistedRemoteWorkspaceConfig,
   type PersistedRemoteWorkspaceProfile,
   type PersistedWindowState,
@@ -110,6 +112,7 @@ import {
   writeDatabaseRows,
   writeDatabaseSchema,
   createDatabase,
+  renameDatabase,
   createRecordPage,
   listDatabases
 } from './databases'
@@ -391,7 +394,12 @@ function findWindowForVaultRoot(root: string): BrowserWindow | null {
 
 function queueMarkdownFileOpen(rawPath: string, reuseMainWindow: boolean): void {
   pendingFileOpens.push({ absPath: path.resolve(rawPath), reuseMainWindow })
-  if (app.isReady()) void flushPendingFileOpens()
+  // Only flush eagerly once startup is finished. During startup `app.isReady()`
+  // is already true (we're inside whenReady), so an eager flush here would
+  // drain the queue before whenReady's own flush runs — that flush would then
+  // report "nothing opened" and open a redundant default window alongside the
+  // file's window, so `zen open` (and double-clicking a .md) opened two. (#178)
+  if (app.isReady() && appStartupComplete) void flushPendingFileOpens()
 }
 
 function handleStartupMarkdownArgs(argv: string[], reuseMainWindow: boolean): void {
@@ -2003,6 +2011,13 @@ function registerIpc(): void {
     return await setVaultSettings(v.root, next)
   })
 
+  handle(IPC.VAULT_ROOT_CONTENT_HIDDEN, async () => {
+    // Local-vault only: a remote workspace manages its own layout server-side.
+    if (isRemoteWorkspaceActive()) return false
+    const v = requireVault()
+    return await rootContentHiddenByInboxMode(v.root)
+  })
+
   handle(IPC.VAULT_LIST_NOTES, async () => {
     if (isRemoteWorkspaceActive()) return await requireRemoteWorkspaceClient().listNotes()
     const v = requireVault()
@@ -2176,7 +2191,17 @@ function registerIpc(): void {
 
   handle(IPC.VAULT_OPEN_DATABASE, async (_e, relPath: string) => {
     ensureLocalForDatabases()
-    return await readDatabase(requireVault().root, relPath)
+    try {
+      return await readDatabase(requireVault().root, relPath)
+    } catch (err) {
+      // A missing database isn't exceptional — its tab can simply outlive the
+      // file (deleted by us or another client). Return null so the renderer
+      // forgets it, instead of rejecting and logging a noisy
+      // "Error occurred in handler for 'vault:open-database'". Real errors
+      // (parse/permission) still throw.
+      if (err instanceof Error && err.message.startsWith('Database not found')) return null
+      throw err
+    }
   })
 
   handle(IPC.VAULT_WRITE_DATABASE_ROWS, async (_e, relPath: string, rows: DbRow[]) => {
@@ -2199,6 +2224,11 @@ function registerIpc(): void {
       return await createDatabase(requireVault().root, folder, subpath, title)
     }
   )
+
+  handle(IPC.VAULT_RENAME_DATABASE, async (_e, csvPath: string, newTitle: string) => {
+    ensureLocalForDatabases()
+    return await renameDatabase(requireVault().root, csvPath, newTitle)
+  })
 
   handle(
     IPC.VAULT_CREATE_RECORD_PAGE,
@@ -2251,6 +2281,17 @@ function registerIpc(): void {
       }
       const v = requireVault()
       return await createNote(v.root, folder, title, subpath)
+    }
+  )
+
+  handle(
+    IPC.VAULT_CREATE_EXCALIDRAW,
+    async (_e, folder: NoteFolder, subpath: string = '', title?: string) => {
+      if (isRemoteWorkspaceActive()) {
+        return await requireRemoteWorkspaceClient().createExcalidraw(folder, subpath, title)
+      }
+      const v = requireVault()
+      return await createExcalidraw(v.root, folder, subpath, title)
     }
   )
 
@@ -2755,6 +2796,7 @@ function ensureQuickCaptureWindow(): BrowserWindow {
     height: 340,
     minWidth: 460,
     minHeight: 260,
+    title: 'ZenNotes Quick Capture',
     show: false,
     frame: false,
     titleBarStyle: mac ? 'hiddenInset' : 'hidden',
@@ -2992,10 +3034,12 @@ function installAppMenu(): void {
         { role: 'minimize' },
         { role: 'zoom' },
         { type: 'separator' },
-        { role: 'toggleTabBar' },
-        { role: 'selectNextTab' },
-        { role: 'selectPreviousTab' },
-        { role: 'mergeAllWindows' },
+        // Electron 41 leaves these macOS tab roles unlabeled unless the
+        // template supplies text, which renders as blank Window menu rows.
+        { role: 'toggleTabBar', label: 'Toggle Tab Bar' },
+        { role: 'selectNextTab', label: 'Show Next Tab' },
+        { role: 'selectPreviousTab', label: 'Show Previous Tab' },
+        { role: 'mergeAllWindows', label: 'Merge All Windows' },
         { type: 'separator' },
         { role: 'front' }
       ]
