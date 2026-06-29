@@ -131,7 +131,8 @@ export const IPC = {
   OVERRIDES_LIST: 'overrides:list',
   OVERRIDES_REVEAL: 'overrides:reveal',
   OVERRIDES_DELETE: 'overrides:delete',
-  OVERRIDES_ON_CHANGE: 'overrides:on-change'
+  OVERRIDES_ON_CHANGE: 'overrides:on-change',
+  DEVTOOLS_TOGGLE: 'devtools:toggle'
 } as const
 
 export interface TikzRenderResponse {

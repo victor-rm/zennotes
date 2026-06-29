@@ -346,6 +346,8 @@ interface Prefs {
   keymapOverrides: KeymapOverrides
   /** Enabled CSS overrides, keyed by filename (e.g. `"focus.css": "on"`). Persisted. */
   enabledOverrides: Record<string, string>
+  /** Visual color tweaks from the picker UI, keyed by token slug (e.g. `"accent": "#ff3b30"`). Persisted. */
+  themeTweaks: Record<string, string>
   /** When true, pressing the leader key shows the next available Vim-style actions. */
   whichKeyHints: boolean
   /** Whether leader hints auto-hide after a timeout or stay open until dismissed. */
@@ -520,6 +522,7 @@ export const DEFAULT_PREFS: Prefs = {
   themeFamily: 'gruvbox',
   themeMode: 'dark',
   enabledOverrides: {},
+  themeTweaks: {},
   editorFontSize: 16,
   editorLineHeight: 1.7,
   previewMaxWidth: 920,
@@ -591,6 +594,7 @@ function normalizePrefs(p: Partial<Prefs>): Prefs {
         : DEFAULT_PREFS.vimYankToClipboard,
     keymapOverrides: normalizeKeymapOverrides(p.keymapOverrides),
     enabledOverrides: normalizeEnabledOverrides(p.enabledOverrides),
+    themeTweaks: normalizeThemeTweaks(p.themeTweaks),
     whichKeyHints:
       typeof p.whichKeyHints === 'boolean'
         ? p.whichKeyHints
@@ -1350,6 +1354,7 @@ function collectPrefs(s: {
   vimYankToClipboard: boolean
   keymapOverrides: KeymapOverrides
   enabledOverrides: Record<string, string>
+  themeTweaks: Record<string, string>
   whichKeyHints: boolean
   whichKeyHintMode: WhichKeyHintMode
   whichKeyHintTimeoutMs: number
@@ -1412,6 +1417,7 @@ function collectPrefs(s: {
     vimYankToClipboard: s.vimYankToClipboard,
     keymapOverrides: s.keymapOverrides,
     enabledOverrides: s.enabledOverrides,
+    themeTweaks: s.themeTweaks,
     whichKeyHints: s.whichKeyHints,
     whichKeyHintMode: s.whichKeyHintMode,
     whichKeyHintTimeoutMs: s.whichKeyHintTimeoutMs,
@@ -1782,6 +1788,8 @@ interface Store {
   keymapOverrides: KeymapOverrides
   /** Enabled CSS overrides, keyed by filename. Persisted to config [overrides]. */
   enabledOverrides: Record<string, string>
+  /** Visual color tweaks (token slug → color). Persisted to config [tweaks]. */
+  themeTweaks: Record<string, string>
   whichKeyHints: boolean
   whichKeyHintMode: WhichKeyHintMode
   whichKeyHintTimeoutMs: number
@@ -1890,6 +1898,10 @@ interface Store {
   overrides: Override[]
   /** Toggle a override on/off (persists to the config [overrides] table). */
   setOverrideEnabled(name: string, on: boolean): void
+  /** Set or clear a visual color tweak (slug → color; null clears it). Persisted. */
+  setThemeTweak(slug: string, value: string | null): void
+  /** Clear all visual color tweaks. */
+  resetThemeTweaks(): void
   tasksLoading: boolean
   tasksFilter: string
   taskCursorIndex: number
@@ -3198,6 +3210,7 @@ export const useStore = create<Store>((set, get) => {
   vimYankToClipboard: loadPrefs().vimYankToClipboard,
   keymapOverrides: loadPrefs().keymapOverrides,
   enabledOverrides: loadPrefs().enabledOverrides,
+  themeTweaks: loadPrefs().themeTweaks,
   whichKeyHints: loadPrefs().whichKeyHints,
   whichKeyHintMode: loadPrefs().whichKeyHintMode,
   whichKeyHintTimeoutMs: loadPrefs().whichKeyHintTimeoutMs,
@@ -4867,6 +4880,20 @@ export const useStore = create<Store>((set, get) => {
       else delete next[name]
       return { enabledOverrides: next }
     })
+    savePrefs(collectPrefs(get()))
+  },
+  setThemeTweak: (slug, value) => {
+    set((s) => {
+      const next = { ...s.themeTweaks }
+      if (value) next[slug] = value
+      else delete next[slug]
+      return { themeTweaks: next }
+    })
+    // State updates immediately (live preview); the config write is debounced.
+    scheduleThemeTweaksSave()
+  },
+  resetThemeTweaks: () => {
+    set({ themeTweaks: {} })
     savePrefs(collectPrefs(get()))
   },
   setWhichKeyHints: (on) => {
@@ -7205,6 +7232,29 @@ export function initCustomThemes(): void {
       /* ignore */
     }
   }
+}
+
+let themeTweaksSaveTimer: ReturnType<typeof setTimeout> | null = null
+/** Debounce persistence of theme tweaks so dragging a color picker (which fires
+ *  continuously) doesn't spam the config file; in-memory state still updates
+ *  immediately for live preview. */
+function scheduleThemeTweaksSave(): void {
+  if (themeTweaksSaveTimer) clearTimeout(themeTweaksSaveTimer)
+  themeTweaksSaveTimer = setTimeout(() => {
+    themeTweaksSaveTimer = null
+    savePrefs(collectPrefs(useStore.getState()))
+  }, 250)
+}
+
+/** Keep only string→string entries (token slug → color). */
+function normalizeThemeTweaks(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof value === 'string' && value) out[key] = value
+    }
+  }
+  return out
 }
 
 /** Keep only string→string entries with a `.css` key (tolerant of hand edits). */

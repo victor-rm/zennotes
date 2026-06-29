@@ -4,6 +4,7 @@ import { resolveAuto, findTheme } from './lib/themes'
 import {
   injectActiveTheme,
   injectOverrides,
+  injectTweaks,
   isCustomThemeId,
   customThemeSlugFromId,
   resolveCustomThemeMode
@@ -274,6 +275,7 @@ function App(): JSX.Element {
   const customThemes = useStore((s) => s.customThemes)
   const overrides = useStore((s) => s.overrides)
   const enabledOverrides = useStore((s) => s.enabledOverrides)
+  const themeTweaks = useStore((s) => s.themeTweaks)
   const editorFontSize = useStore((s) => s.editorFontSize)
   const editorLineHeight = useStore((s) => s.editorLineHeight)
   const previewMaxWidth = useStore((s) => s.previewMaxWidth)
@@ -450,6 +452,11 @@ function App(): JSX.Element {
   useEffect(() => {
     injectOverrides(overrides, enabledOverrides)
   }, [overrides, enabledOverrides])
+
+  // Inject the visual color tweaks (the picker UI) as the topmost layer.
+  useEffect(() => {
+    injectTweaks(themeTweaks)
+  }, [themeTweaks])
 
   // Apply editor font size + line height + all three font families as
   // CSS variables. Each family has its own fallback stack so leaving it

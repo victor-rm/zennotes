@@ -2797,6 +2797,11 @@ function registerIpc(): void {
   handle(IPC.OVERRIDES_DELETE, async (_event, name: string) => {
     await deleteOverride(name)
   })
+  handle(IPC.DEVTOOLS_TOGGLE, (event) => {
+    const wc = event.sender
+    if (wc.isDevToolsOpened()) wc.closeDevTools()
+    else wc.openDevTools({ mode: 'detach' })
+  })
 }
 
 /** Push an externally-changed config (synced dotfile / hand-edit) to every

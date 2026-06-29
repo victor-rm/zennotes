@@ -279,6 +279,11 @@ const MAP_TABLE_FIELDS: Partial<Record<PortablePrefKey, MapTableField>> = {
     table: 'overrides',
     comment: ['Enabled CSS overrides — list the filenames you want active.'],
     example: '"focus.css" = "on"'
+  },
+  themeTweaks: {
+    table: 'tweaks',
+    comment: ['Visual color tweaks from Settings → Appearance (token slug = color).'],
+    example: '"accent" = "#ff3b30"'
   }
 }
 

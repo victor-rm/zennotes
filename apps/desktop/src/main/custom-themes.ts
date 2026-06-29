@@ -160,7 +160,7 @@ Reference files that live beside \`theme.css\` with the \`zen-theme://\` scheme
   font-family: "My Font";
   src: url(zen-theme://my-theme/my-font.woff2) format("woff2");
 }
-:root { --z-font-text: "My Font", ui-sans-serif, sans-serif; }
+:root { --z-text-font: "My Font", ui-sans-serif, sans-serif; }
 \`\`\`
 
 See \`soft-paper/\` in this folder for a complete example.

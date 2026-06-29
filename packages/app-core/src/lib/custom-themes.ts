@@ -17,12 +17,13 @@ import {
   type CustomTheme,
   type CustomThemeMode
 } from '@shared/custom-themes'
-import { isOverrideEnabled, type Override } from '@shared/overrides'
+import { buildTweaksCss, isOverrideEnabled, type Override } from '@shared/overrides'
 
 export { isCustomThemeId, customThemeSlugFromId }
 
 const ACTIVE_THEME_STYLE_ID = 'zen-active-theme'
 const OVERRIDES_STYLE_ID = 'zen-overrides'
+const TWEAKS_STYLE_ID = 'zen-tweaks'
 
 /**
  * Create/update/remove a managed `<style>` by id. Empty `css` removes it.
@@ -44,12 +45,16 @@ function applyManagedStyle(id: string, css: string): HTMLStyleElement | null {
   return style
 }
 
-/** Move the overrides <style> to the end of <head> so it stays after the active
- *  theme and the bundled stylesheet (later source order → overrides win ties). */
-function ensureOverridesLast(): void {
+/** Keep the managed layers in cascade order at the end of <head>: active theme →
+ *  overrides → tweaks. Re-appending in this order (regardless of when each was
+ *  created) guarantees the visual tweaks win, then hand overrides, over the
+ *  active theme and the bundled stylesheet. */
+function ensureLayerOrder(): void {
   if (typeof document === 'undefined') return
-  const overrides = document.getElementById(OVERRIDES_STYLE_ID)
-  if (overrides) document.head.appendChild(overrides)
+  for (const id of [ACTIVE_THEME_STYLE_ID, OVERRIDES_STYLE_ID, TWEAKS_STYLE_ID]) {
+    const el = document.getElementById(id)
+    if (el) document.head.appendChild(el)
+  }
 }
 
 /** Inject (or clear) the active custom theme's raw CSS. Built-in themes — or a
@@ -58,7 +63,7 @@ export function injectActiveTheme(themeId: string, themes: CustomTheme[]): void 
   const slug = customThemeSlugFromId(themeId)
   const theme = slug ? themes.find((t) => t.slug === slug && !t.error) : undefined
   applyManagedStyle(ACTIVE_THEME_STYLE_ID, theme?.css ?? '')
-  ensureOverridesLast()
+  ensureLayerOrder()
 }
 
 /** Inject the enabled overrides (filename order) after the active theme. */
@@ -73,7 +78,14 @@ export function injectOverrides(
     .map((s) => `/* @override ${s.name} */\n${s.css.trim()}`)
     .join('\n\n')
   applyManagedStyle(OVERRIDES_STYLE_ID, css)
-  ensureOverridesLast()
+  ensureLayerOrder()
+}
+
+/** Inject the visual color tweaks (the picker UI) as the topmost managed layer,
+ *  so an explicit pick wins over the active theme and any hand override. */
+export function injectTweaks(tweaks: Record<string, string> | undefined): void {
+  applyManagedStyle(TWEAKS_STYLE_ID, buildTweaksCss(tweaks))
+  ensureLayerOrder()
 }
 
 /**

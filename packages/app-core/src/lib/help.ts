@@ -157,9 +157,24 @@ export const HELP_HOW_TO_GUIDES: HelpCard[] = [
       'Prefer ZenNotes in a browser instead of the desktop app? Pull the prebuilt, multi-arch image from Docker Hub with `docker pull adibhanna/zennotes`, generate a login token and keep a copy (`openssl rand -hex 32`), then start the container with your vault mounted:\n`docker run -d -p 127.0.0.1:7878:7878 \\\n  -e ZENNOTES_AUTH_TOKEN=<your-token> \\\n  -v "$HOME/Documents/MyVault:/workspace" \\\n  -v "$HOME/zennotes-data:/data" \\\n  adibhanna/zennotes:latest`\nThe server binds to 0.0.0.0, so it will not start without that token — open http://localhost:7878 and paste the token on first connect. Your notes stay as ordinary .md files on the host, and the desktop app can point at the same server. The full walkthrough, including reverse-proxy and TLS hardening, lives at zennotes.org/docs.'
   },
   {
-    title: 'Build your own theme or tweak an existing one',
+    title: 'Customize the look: themes vs. overrides',
     body:
-      'ZenNotes themes are CSS. Open Settings → Appearance → Custom and choose New theme to scaffold a folder (`~/.config/zennotes/themes/<name>/` with a `manifest.json` and a `theme.css`), or drop one in yourself — edits apply live. Set the `--z-*` design tokens under `:root` and put dark-mode overrides under `:root[data-theme-mode="dark"]`. Bundle fonts or images beside the file and reference them with `url(zen-theme://<your-folder>/file.woff2)` (remote URLs are not loaded). To change just one thing about *any* theme, add a CSS override under Settings → Appearance → Overrides: a small `.css` file you toggle on or off — target `:root[data-theme] { --z-accent: 255 59 48; }` so it wins over the active theme.'
+      'ZenNotes has two CSS-based ways to change how it looks. A **theme** is a complete palette you select under Settings → Appearance → Custom. An **override** is a small CSS file that layers on top of whichever theme is active, toggled on or off under Settings → Appearance → Overrides. Reach for a theme to design a whole look; reach for an override to change one or two things — a different accent, a darker background — without forking a theme. Both apply live, no restart.'
+  },
+  {
+    title: 'Build a custom theme',
+    body:
+      'Settings → Appearance → Custom → New theme scaffolds a folder at `~/.config/zennotes/themes/<name>/` with a `manifest.json` and a `theme.css`, reveals it, and adds a card you click to apply. Edits to `theme.css` apply live. Only the active theme CSS is loaded, so write `:root { … }` for the light/shared values and `:root[data-theme-mode="dark"] { … }` for dark — you never put the theme name in a selector. Colors are the `--z-*` tokens, written as space-separated RGB (`--z-accent: 255 59 48;`): backgrounds `--z-bg` / `--z-bg-softer` / `--z-bg-1`…`--z-bg-4`, text `--z-fg-1` / `--z-fg-2` / `--z-grey-0`…`--z-grey-2`, accent `--z-accent` / `--z-accent-soft` / `--z-accent-muted`, and the syntax hues `--z-red` / `--z-green` / `--z-yellow` / `--z-blue` / `--z-purple` / `--z-aqua`. `manifest.json` carries name, author, version, description, `modes` (light | dark | both), and an optional preview swatch.'
+  },
+  {
+    title: 'Override one thing on any theme',
+    body:
+      'An override is a `.css` file in `~/.config/zennotes/overrides/`, toggled under Settings → Appearance → Overrides. Enabled overrides inject on top of the active theme in filename order, so they win the cascade — target `:root[data-theme] { … }` so the rule beats both built-in and custom themes. Because they sit on top, one override re-themes everything: `:root[data-theme] { --z-accent: 255 59 48; }` turns the accent hot pink on every theme. Overrides stack, so keep several small ones and flip each independently. The seeded `example.css` is a commented cookbook with the full token list and ready-to-uncomment recipes. To find what controls an element, use the **Developer tools** button in that same Overrides section and inspect it.'
+  },
+  {
+    title: 'Bundle fonts and images in a theme',
+    body:
+      'Ship an asset with a theme by dropping the file in the theme folder and referencing it with the `zen-theme://` scheme, where the host is the folder name: `@font-face { font-family: "Display"; src: url(zen-theme://my-theme/display.woff2); }`. Remote http/https URLs are never loaded, so themes stay self-contained and work offline; small images can also be inlined as `data:` URIs. Font family and text size are not theme tokens — set those under Settings → Typography.'
   }
 ]
 

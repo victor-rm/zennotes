@@ -41,7 +41,13 @@ import { resolveAuto, THEMES, type ThemeFamily, type ThemeMode } from '../lib/th
 import { customThemeSlugFromId } from '../lib/custom-themes'
 import { TrashIcon, ExternalIcon } from './icons'
 import { customThemeSupportsMode, type CustomTheme } from '@shared/custom-themes'
-import { isOverrideEnabled, type Override } from '@shared/overrides'
+import {
+  buildTweaksCss,
+  isOverrideEnabled,
+  TWEAKABLE_TOKENS,
+  type Override,
+  type TweakableToken
+} from '@shared/overrides'
 import { hasSystemFontAccess, listSystemFonts } from '../lib/system-fonts'
 import {
   DEFAULT_SYSTEM_FOLDER_LABELS,
@@ -308,6 +314,21 @@ function formatReleaseNotesForDisplay(notes: string | null): string | null {
   }
 }
 
+/** Read a `--z-*` token's current resolved value off <html> as #rrggbb, for
+ *  seeding the Quick-tweaks pickers from the active theme. */
+function rgbVarToHex(token: string): string {
+  if (typeof document === 'undefined') return '#000000'
+  const parts = getComputedStyle(document.documentElement)
+    .getPropertyValue(token)
+    .trim()
+    .split(/\s+/)
+    .map(Number)
+  if (parts.length < 3 || parts.some((n) => !Number.isFinite(n))) return '#000000'
+  const hex = (n: number): string =>
+    Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0')
+  return `#${hex(parts[0])}${hex(parts[1])}${hex(parts[2])}`
+}
+
 export function SettingsModal(): JSX.Element {
   const zenBridge = getZenBridge()
   const appInfo = zenBridge.getAppInfo()
@@ -458,6 +479,9 @@ export function SettingsModal(): JSX.Element {
   const overrides = useStore((s) => s.overrides)
   const enabledOverrides = useStore((s) => s.enabledOverrides)
   const setOverrideEnabled = useStore((s) => s.setOverrideEnabled)
+  const themeTweaks = useStore((s) => s.themeTweaks)
+  const setThemeTweak = useStore((s) => s.setThemeTweak)
+  const resetThemeTweaks = useStore((s) => s.resetThemeTweaks)
   const editorFontSize = useStore((s) => s.editorFontSize)
   const setEditorFontSize = useStore((s) => s.setEditorFontSize)
   const editorLineHeight = useStore((s) => s.editorLineHeight)
@@ -814,6 +838,114 @@ export function SettingsModal(): JSX.Element {
     }
   }
 
+  // Keep the swatches showing the *active theme's* colors: re-read each token
+  // whenever the applied theme changes (data-theme / data-theme-mode flip on
+  // <html>), via an observer so it's robust to React effect ordering.
+  const [themeColors, setThemeColors] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const read = (): void => {
+      const next: Record<string, string> = {}
+      for (const t of TWEAKABLE_TOKENS) {
+        if ((t.kind ?? 'color') === 'color') next[t.token] = rgbVarToHex(t.token)
+      }
+      setThemeColors(next)
+    }
+    read()
+    const obs = new MutationObserver(read)
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'data-theme-mode']
+    })
+    return () => obs.disconnect()
+  }, [])
+
+  const copyTweaksCss = (): void => {
+    void navigator.clipboard?.writeText(buildTweaksCss(themeTweaks)).catch(() => {})
+  }
+
+  const renderTweak = (t: TweakableToken) => {
+    const tweaked = themeTweaks[t.slug] != null
+    const resetBtn = tweaked ? (
+      <button
+        type="button"
+        onClick={() => setThemeTweak(t.slug, null)}
+        title={`Reset ${t.label}`}
+        className="shrink-0 text-ink-400 transition-colors hover:text-ink-800"
+      >
+        ↺
+      </button>
+    ) : null
+
+    if (t.kind === 'preset') {
+      const current = themeTweaks[t.slug] ?? 'default'
+      return (
+        <div key={t.slug} className="flex items-center gap-3 text-xs text-ink-700">
+          <span className="w-32 shrink-0 truncate">{t.label}</span>
+          <div className="inline-flex rounded-xl border border-paper-300/70 bg-paper-100/75 p-1">
+            {(t.options ?? []).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setThemeTweak(t.slug, opt.value === 'default' ? null : opt.value)}
+                className={[
+                  'rounded-lg px-3 py-1 text-xs transition-colors',
+                  current === opt.value
+                    ? 'bg-paper-50 text-ink-900 shadow-sm'
+                    : 'text-ink-600 hover:text-ink-900'
+                ].join(' ')}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    if (t.kind === 'length') {
+      const value = Number(themeTweaks[t.slug] ?? t.fallback ?? t.min ?? 0)
+      return (
+        <div key={t.slug} className="flex items-center gap-2 text-xs text-ink-700">
+          <span className="w-32 shrink-0 truncate">{t.label}</span>
+          <input
+            type="range"
+            min={t.min}
+            max={t.max}
+            step={t.step}
+            value={value}
+            onInput={(e) => setThemeTweak(t.slug, (e.target as HTMLInputElement).value)}
+            aria-label={t.label}
+            className="h-1.5 flex-1 cursor-pointer accent-accent"
+          />
+          <span className="w-12 shrink-0 text-right tabular-nums text-ink-500">
+            {value}
+            {t.displaySuffix ?? t.unit}
+          </span>
+          {resetBtn}
+        </div>
+      )
+    }
+
+    return (
+      <label key={t.slug} className="flex items-center gap-2 text-xs text-ink-700">
+        <input
+          type="color"
+          value={themeTweaks[t.slug] ?? themeColors[t.token] ?? '#000000'}
+          onInput={(e) => setThemeTweak(t.slug, (e.target as HTMLInputElement).value)}
+          aria-label={`${t.label} color`}
+          className="h-7 w-9 shrink-0 cursor-pointer rounded-md border border-paper-300/70 bg-transparent p-0"
+        />
+        <span className="flex-1 truncate">{t.label}</span>
+        {resetBtn}
+      </label>
+    )
+  }
+
+  const openDevTools = (): void => {
+    void window.zen.toggleDevTools?.()
+  }
+
   const revealOverridesFolder = (): void => {
     void window.zen.revealOverridesDir?.()
   }
@@ -1154,14 +1286,98 @@ export function SettingsModal(): JSX.Element {
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <div className="text-xs font-medium uppercase tracking-[0.18em] text-ink-500">
+                    Quick tweaks
+                  </div>
+                  {Object.keys(themeTweaks).length > 0 && (
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={copyTweaksCss}
+                        title="Copy these tweaks as CSS you can paste into an override"
+                        className="text-xs text-ink-500 transition-colors hover:text-ink-800"
+                      >
+                        Copy CSS
+                      </button>
+                      <button
+                        onClick={resetThemeTweaks}
+                        className="text-xs text-ink-500 transition-colors hover:text-ink-800"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <p className="mb-2.5 text-xs leading-5 text-ink-500">
+                  Adjust the active theme — colors and a few layout options — with no CSS. These
+                  apply on top of whichever theme is selected; reset any one with ↺.
+                </p>
+                <div className="flex flex-col gap-2.5">
+                  {TWEAKABLE_TOKENS.filter((t) => t.group === 'accent').map(renderTweak)}
+                  <div className="mt-1 text-xs uppercase tracking-wide text-ink-400">
+                    Syntax &amp; diagnostic colors
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+                    {TWEAKABLE_TOKENS.filter((t) => t.group === 'syntax').map(renderTweak)}
+                  </div>
+                  <div className="mt-1 text-xs uppercase tracking-wide text-ink-400">Layout</div>
+                  <div className="flex flex-col gap-2.5">
+                    {TWEAKABLE_TOKENS.filter((t) => t.group === 'layout').map(renderTweak)}
+                  </div>
+                </div>
+                {/* Live preview — built from the same --z-* tokens, so it reflects the tweaks
+                    above instantly. Lets you see tab density / corner radius / accent without
+                    closing the modal to look at the app behind it. */}
+                <div className="mt-3 rounded-lg border border-paper-300/60 bg-paper-100/50 p-3">
+                  <div className="mb-2 text-xs uppercase tracking-wide text-ink-400">Preview</div>
+                  {/* mock tab strip — tracks tab density (height + padding) + corner radius */}
+                  <div className="flex items-stretch overflow-hidden rounded-md bg-paper-200 p-1">
+                    <div
+                      className="flex items-center rounded bg-paper-50 px-[var(--z-tab-pad-x)] text-xs text-ink-900 shadow-sm"
+                      style={{ height: 'var(--z-tab-height)' }}
+                    >
+                      Welcome.md
+                    </div>
+                    <div
+                      className="flex items-center px-[var(--z-tab-pad-x)] text-xs text-ink-500"
+                      style={{ height: 'var(--z-tab-height)' }}
+                    >
+                      Ideas.md
+                    </div>
+                  </div>
+                  {/* button + accent selection — track corner radius + accent color */}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="rounded-md bg-ink-900 px-3 py-1 text-xs font-medium text-paper-50">
+                      Button
+                    </span>
+                    <span className="rounded-md border border-accent/45 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
+                      Selected
+                    </span>
+                    <span className="text-xs font-medium text-accent">link</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="text-xs font-medium uppercase tracking-[0.18em] text-ink-500">
                     Overrides
                   </div>
-                  <button
-                    onClick={revealOverridesFolder}
-                    className="text-xs text-ink-500 transition-colors hover:text-ink-800"
-                  >
-                    Open overrides folder
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {appInfo.runtime === 'desktop' && (
+                      <button
+                        onClick={openDevTools}
+                        title="Inspect elements to find --z-* tokens and class names"
+                        className="text-xs text-ink-500 transition-colors hover:text-ink-800"
+                      >
+                        Developer tools
+                      </button>
+                    )}
+                    <button
+                      onClick={revealOverridesFolder}
+                      className="text-xs text-ink-500 transition-colors hover:text-ink-800"
+                    >
+                      Open overrides folder
+                    </button>
+                  </div>
                 </div>
                 {overrides.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-paper-300/70 px-3 py-3 text-xs leading-5 text-ink-500">

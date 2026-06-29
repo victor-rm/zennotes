@@ -182,6 +182,15 @@
 }
 
 /* ===========================================================================
+ * Layout tokens — non-theme dimensions, overridable via Quick tweaks.
+ * =======================================================================*/
+:root {
+  --z-tab-height: 2.5rem; /* editor tab strip height (default = h-10) */
+  --z-tab-pad-x: 0.5rem; /* editor tab horizontal padding (default = px-2) */
+  --z-radius-scale: 1; /* global corner-radius multiplier; 0 = square corners */
+}
+
+/* ===========================================================================
  * Custom (user-authored) themes — color-scheme follows the resolved mode.
  * Built-ins set color-scheme per data-theme id; custom themes use one id
  * (custom-<slug>) plus data-theme-mode, so map it here as a fallback for

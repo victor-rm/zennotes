@@ -70,9 +70,9 @@ const EXAMPLE = `/* ZenNotes override — a cookbook. Toggle it on in Settings �
 }
 */
 
-/* Any other CSS works too — inspect an element (View → Toggle Developer Tools)
- * to find its class, then style it. Fonts and text size live in
- * Settings → Typography, so set those there. */
+/* Any other CSS works too — use the "Developer tools" button in Settings →
+ * Appearance → Overrides to inspect an element, find its class, then style it.
+ * Fonts and text size live in Settings → Typography, so set those there. */
 `
 
 const README = `# ZenNotes overrides

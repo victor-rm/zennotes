@@ -1546,7 +1546,8 @@ export const httpBridge: ZenBridge = {
   listOverrides: async () => [],
   revealOverridesDir: async () => {},
   deleteOverride: async () => {},
-  onOverridesChange: () => () => {}
+  onOverridesChange: () => () => {},
+  toggleDevTools: async () => {}
 }
 
 export function installBridge(): void {

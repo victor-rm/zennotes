@@ -280,6 +280,9 @@ export interface ZenBridge {
   deleteOverride(name: string): Promise<void>
   /** Subscribe to changes in the overrides directory. */
   onOverridesChange(cb: (next: Override[]) => void): () => void
+  /** Open/close the renderer's developer tools (for inspecting elements while
+   *  authoring themes/overrides). No-op on web. */
+  toggleDevTools(): Promise<void>
 }
 
 let installedBridge: ZenBridge | null = null

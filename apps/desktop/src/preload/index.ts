@@ -532,7 +532,9 @@ const api: ZenBridge = {
     const listener = (_: unknown, next: Override[]): void => cb(next)
     ipcRenderer.on(IPC.OVERRIDES_ON_CHANGE, listener)
     return () => ipcRenderer.removeListener(IPC.OVERRIDES_ON_CHANGE, listener)
-  }
+  },
+
+  toggleDevTools: (): Promise<void> => ipcRenderer.invoke(IPC.DEVTOOLS_TOGGLE)
 }
 
 export type ZenApi = ZenBridge
