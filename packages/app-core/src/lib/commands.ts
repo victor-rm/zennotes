@@ -457,6 +457,15 @@ export function buildCommands(options?: { includeUnavailable?: boolean }): Comma
       run: () => getState().closeActiveNote()
     },
     {
+      id: 'tab.reopen',
+      title: 'Reopen Closed Tab',
+      category: 'Tabs',
+      keywords: 'restore last undo closed reopen',
+      shortcut: shortcut('global.reopenClosedTab'),
+      when: () => getState().closedTabStack.length > 0,
+      run: () => getState().reopenLastClosedTab()
+    },
+    {
       id: 'tab.pin',
       title: isActiveTabPinned() ? 'Unpin Tab' : 'Pin Tab',
       category: 'Tabs',

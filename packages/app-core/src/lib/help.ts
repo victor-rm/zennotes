@@ -330,6 +330,7 @@ export const HELP_SHORTCUT_SECTIONS: HelpShortcutSection[] = [
       { keys: 'Alt+H / Alt+J / Alt+K / Alt+L', action: 'Focus pane left / down / up / right', detail: 'Always-on pane-focus motions — they work even with Vim mode off and skip the Ctrl+W prefix some Linux setups intercept. (Ctrl+W h/j/k/l still works in Vim mode.)' },
       { keys: 'Mod+.', action: 'Toggle Zen mode', detail: 'Hide or restore the app chrome so only the active editor, preview, or split view stays on screen.' },
       { keys: 'Mod+W', action: 'Close active tab', detail: 'Close the current note or virtual tab.' },
+      { keys: 'Shift+Mod+T', action: 'Reopen closed tab', detail: 'Reopen the most recently closed tab, restoring its position and pinned state. Repeat to walk back through your close history.' },
       { keys: 'Shift+Mod+E', action: 'Export note as PDF', detail: 'Export the active note as a PDF file.' },
       { keys: 'Mod+=', action: 'Zoom in', detail: 'Scale the whole app up, including chrome, editor, and preview.' },
       { keys: 'Mod+-', action: 'Zoom out', detail: 'Scale the whole app down when the UI feels too large.' },
