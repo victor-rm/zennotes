@@ -4245,6 +4245,106 @@ function TemplateSelectRow({
   // A configured template that no longer exists (deleted) shows as missing so
   // the user can pick a replacement; daily/weekly creation falls back to blank.
   const missing = !!value && !templates.some((t) => t.id === value)
+  const selected = templates.find((t) => t.id === value)
+  const triggerLabel = missing
+    ? '[Missing template]'
+    : selected
+      ? `${selected.category} — ${selected.name}`
+      : 'None (blank note)'
+
+  // Custom dropdown (not a native <select>): native popups don't reliably
+  // commit a click on Electron/Linux, so picking a template silently failed
+  // there (#275). This mirrors the rest of Settings (e.g. the font picker).
+  const [open, setOpen] = useState(false)
+  const [activeIdx, setActiveIdx] = useState(0)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null)
+
+  // Row 0 is "None (blank note)" (null), then each template in order.
+  const items = useMemo<Array<NoteTemplate | null>>(() => [null, ...templates], [templates])
+
+  // Highlight the current selection when the menu opens.
+  useEffect(() => {
+    if (!open) return
+    const current = value ? items.findIndex((t) => t?.id === value) : 0
+    setActiveIdx(current >= 0 ? current : 0)
+  }, [open, items, value])
+
+  // Close on an outside click.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      const target = e.target as Node
+      if (buttonRef.current?.contains(target)) return
+      if (document.getElementById('zen-template-portal')?.contains(target)) return
+      setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  // Position the popover below the trigger; track scroll/resize.
+  useLayoutEffect(() => {
+    if (!open) return
+    const update = (): void => {
+      const el = buttonRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      setRect({ left: r.left, top: r.bottom + 4, width: Math.max(260, r.width) })
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [open])
+
+  // Keep the keyboard-highlighted row in view.
+  useEffect(() => {
+    if (!open || !listRef.current) return
+    listRef.current
+      .querySelector<HTMLElement>(`[data-idx="${activeIdx}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [activeIdx, open])
+
+  const commit = (templateId: string | undefined): void => {
+    onChange(templateId)
+    setOpen(false)
+    buttonRef.current?.focus()
+  }
+
+  const onTriggerKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>): void => {
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        setOpen(true)
+      }
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setActiveIdx((i) => Math.min(items.length - 1, i + 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveIdx((i) => Math.max(0, i - 1))
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      commit(items[activeIdx]?.id)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setOpen(false)
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setActiveIdx(0)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      setActiveIdx(items.length - 1)
+    }
+  }
+
   return (
     <div
       className="flex items-center justify-between gap-5 px-5 py-4"
@@ -4254,23 +4354,71 @@ function TemplateSelectRow({
         <div className="text-sm font-medium text-ink-900">{label}</div>
         {description && <div className="mt-1 text-xs leading-5 text-ink-500">{description}</div>}
       </div>
-      <select
-        value={missing ? '__missing__' : value ?? ''}
-        onChange={(e) => onChange(e.target.value ? e.target.value : undefined)}
-        className="w-[23rem] max-w-[50vw] rounded-xl border border-paper-300/70 bg-paper-100/80 px-3 py-2 text-sm text-ink-900 outline-none focus:border-accent/45"
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={onTriggerKeyDown}
+        className="flex w-[23rem] max-w-[50vw] shrink-0 items-center justify-between gap-2 rounded-xl border border-paper-300/70 bg-paper-100/80 px-3 py-2 text-left text-sm text-ink-900 outline-none transition-colors hover:bg-paper-200 focus:border-accent/45"
       >
-        <option value="">None (blank note)</option>
-        {missing && (
-          <option value="__missing__" disabled>
-            [Missing template]
-          </option>
+        <span className={`truncate ${missing ? 'text-ink-500' : ''}`}>{triggerLabel}</span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="shrink-0 text-ink-500"
+          aria-hidden="true"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+
+      {open &&
+        rect &&
+        createPortal(
+          <div
+            id="zen-template-portal"
+            role="listbox"
+            className="fixed z-popover flex max-h-[320px] flex-col overflow-hidden rounded-xl border border-paper-300 bg-paper-100 shadow-float"
+            style={{ left: rect.left, top: rect.top, width: rect.width }}
+          >
+            <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1">
+              {items.map((tpl, idx) => {
+                const isSelected = tpl ? tpl.id === value : !value && !missing
+                const text = tpl ? `${tpl.category} — ${tpl.name}` : 'None (blank note)'
+                return (
+                  <button
+                    key={tpl?.id ?? '__none__'}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    data-idx={idx}
+                    onClick={() => commit(tpl?.id)}
+                    onMouseMove={() => setActiveIdx(idx)}
+                    className={[
+                      'flex w-full items-center px-3 py-1.5 text-left text-sm',
+                      activeIdx === idx
+                        ? 'bg-paper-200 text-ink-900'
+                        : isSelected
+                          ? 'text-ink-900'
+                          : 'text-ink-700'
+                    ].join(' ')}
+                  >
+                    <span className="truncate">{text}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>,
+          document.body
         )}
-        {templates.map((template) => (
-          <option key={template.id} value={template.id}>
-            {template.category} — {template.name}
-          </option>
-        ))}
-      </select>
     </div>
   )
 }
